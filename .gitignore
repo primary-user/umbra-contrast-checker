@@ -3,7 +3,7 @@ test/node_modules/
 test/package-lock.json
 
 # The Chrome DevTools port. Handy locally, wrong in a shipped extension, so it
-# is never committed. docs/internals.md carries the file to recreate.
+# is never committed.
 .debug
 
 # Build output, and Adobe's signing tool once tools/get-zxpsigncmd.sh fetches it.

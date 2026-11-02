@@ -221,7 +221,7 @@ for (const suite of SUITES) {
         'npm test runs ' + suite, 'it is on disk but not in the test script');
 }
 
-const DOCS = ['README.md', 'INSTALL.md', 'docs/internals.md'];
+const DOCS = ['README.md', 'INSTALL.md'];
 const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
 for (const doc of DOCS) {
     const src = read(doc);
