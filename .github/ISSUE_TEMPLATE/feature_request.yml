@@ -1,0 +1,44 @@
+name: Feature request
+description: Something the panel should do and does not
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: >
+        Describe the work, not the feature. Knowing what you are checking and
+        why usually changes what the right answer is.
+      placeholder: >
+        I check a 40 artboard brand deck before every handoff and I want one
+        report I can attach to the ticket.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you had in mind
+      description: Optional. A rough shape is fine.
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do today instead
+      description: >
+        Useful even when the answer is "screenshot it into a browser tool". It
+        tells us how much the gap actually costs.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Before you file
+      options:
+        - label: >
+            I understand the panel refuses to show a number it could not
+            measure, and I am not asking it to estimate one.
+          required: true

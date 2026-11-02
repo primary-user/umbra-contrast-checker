@@ -1,0 +1,36 @@
+name: tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+  # The release workflow runs these first and stops if any fail.
+  workflow_call:
+
+jobs:
+  suites:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      # The extension itself has no dependencies. This installs the test
+      # harness only: jsdom for run-panel, Playwright for run-render.
+      - name: Install test dependencies
+        working-directory: test
+        run: npm install --no-audit --no-fund
+
+      # run-render.js skips cleanly without a browser, and a suite that skips
+      # in CI is a suite that is not running. Install the one it needs.
+      - name: Install Chromium for the render suite
+        working-directory: test
+        run: npx playwright install --with-deps chromium
+
+      - name: Run all five suites
+        working-directory: test
+        run: npm test

@@ -1,0 +1,12 @@
+{
+  "name": "umbra-contrast-checker-tests",
+  "private": true,
+  "description": "Tests for the Umbra Contrast Checker panel. Not shipped in the ZXP. run-render.js needs Playwright and skips cleanly without it.",
+  "scripts": {
+    "test": "node run-hygiene.js && node run-color.js && node run-guards.js && node run-panel.js && node run-render.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0",
+    "playwright": "^1.44.0"
+  }
+}

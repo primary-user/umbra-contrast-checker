@@ -1,0 +1,770 @@
+/*
+  Umbra Contrast Checker — panel styling, tuned to Illustrator's dark UI.
+  Copyright (c) 2026 Artchemy Labs LLC. All rights reserved.
+  Use of this file is governed by the licence in LICENSE at the root of this
+  project. Not for redistribution.
+*/
+
+:root {
+  /* Illustrator's Medium Dark theme. Greys sampled from Adobe's own panel
+     chrome; blue is Spectrum blue-500, the selection colour Illustrator uses. */
+  --bg: #323232;
+  --bar: #3c3c3c;
+  --sunken: #262626;
+  --line: #1d1d1d;
+  --line-soft: #4a4a4a;
+  --btn: #4f4f4f;
+  --btn-hover: #5c5c5c;
+  /*
+     A CONTRAST CHECKER HAS TO PASS ITS OWN CHECK.
+
+     The first palette did not. Measured against the surfaces they actually sit
+     on, eight pairs in this panel's own chrome fell below 4.5:1 — the status
+     text at 3.83, the dimmed labels at 3.81, and white on the accent blue at
+     3.91, which is every primary button in the panel.
+
+     These values were chosen with this extension's own suggestion engine, taking
+     the smallest perceptual move that clears AA. test/run-render.js measures the
+     rendered panel and fails if any of it slips back.
+
+     --accent is dark enough to carry white text; --accent-text is the lighter
+     tint for accent-coloured text on the dark chrome, where the fill colour
+     would be far too dark to read. */
+  --text: #e4e4e4;
+  --text-dim: #b0b0b0;        /* 5.91 on --bg, 4.85 on the chip */
+  --text-faint: #adadad;      /* 4.69 on the lightest surface it lands on */
+  --accent: #1473e6;          /* white on it: 4.54 */
+  /* The popover surface (#3d3d3d) is lighter than --bar, and the old #6ba9f5
+     measured 4.46 against it — so every .link-btn hover inside Settings failed,
+     including the specification link. The sweep never saw it because the hover
+     pass only visits a named list of controls. Smallest move that clears 4.5:
+     4.58 on the popover, 4.65 on --bar, 5.40 on --bg. */
+  --accent-text: #6bacf5;
+  --pass: #38ba90;            /* 4.51 on --bar, 5.24 on --bg */
+  --fail: #f0888d;            /* 4.52 on --bar, 5.25 on --bg */
+  --warn: #e68619;
+  --warn-bg: #3d3122;
+  --warn-text: #f5c98a;       /* 8.19 on --warn-bg */
+  --gear: #ef6d74;            /* an icon, so 3:1 applies: 3.73 on --bar */
+  /* Label text on a raised control. --text-dim measured 3.78 here, which the
+     sweep never saw because the segmented controls live inside a popover the
+     old check skipped entirely. Smallest move that clears 4.5 (dE 4.8). */
+  --text-on-btn: #c2c2c2;     /* 4.60 on --btn */
+
+  /* Type scale. Illustrator's panels sit around 12px for body and 11px for
+     secondary labels; the old 10/11px was noticeably smaller than its
+     neighbours in the dock. */
+  --fs-body: 12px;
+  --fs-label: 11px;
+  --fs-small: 11px;
+}
+
+* { box-sizing: border-box; }
+
+/*
+  THE HIDDEN ATTRIBUTE HAS TO WIN.
+
+  `[hidden] { display: none }` lives in the browser's own stylesheet, and author
+  styles beat browser styles regardless of specificity. So any rule here that
+  sets `display` on an element silently defeats hiding it from JavaScript.
+
+  That is not a hypothetical: `.snapshot-empty { display: flex }` meant the
+  "Reading the screen…" overlay could never be hidden. The loupe was drawing
+  correctly the entire time, underneath an opaque panel nobody could see past —
+  which read exactly like a preview that had never worked.
+
+  Declared once, first, with !important so it cannot happen again. jsdom has no
+  cascade engine and will never catch this class of bug; test/run-render.js
+  drives a real browser for exactly that reason.
+*/
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Adobe Clean", -apple-system, "Segoe UI", sans-serif;
+  font-size: var(--fs-body);
+  overflow-x: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+button { font-family: inherit; cursor: pointer; }
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.bar-title { flex: 1; font-size: var(--fs-body); }
+.status { font-size: var(--fs-label); color: var(--text-faint); }
+.status.live { color: var(--pass); }
+.status.busy { color: var(--accent-text); }
+.status.err { color: var(--fail); }
+
+.icon-btn {
+  background: none;
+  border: 0;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  /* WCAG 2.2 SC 2.5.8 asks for a 24x24 target. These were 26x22 and 23x21 —
+     the two primary tools in the panel, both under the minimum. */
+  min-width: 24px;
+  min-height: 24px;
+  padding: 3px 5px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.icon-btn svg { display: block; }
+/* The gear is deliberately red and deliberately simple: it has to read at a
+   glance from across a desk. */
+#btn-options { color: var(--gear); }
+#btn-options:hover { color: #ff6b73; background: var(--btn); }
+.icon-btn:hover { color: #fff; background: var(--btn); }
+
+/*
+  The standard, on the face of the panel.
+
+  Quiet enough not to compete with the verdict, permanent enough that a
+  compliance reviewer never has to open a menu to learn what was measured.
+*/
+.conformance {
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+  padding: 4px 10px 5px;
+  letter-spacing: .01em;
+}
+
+/* The long form, in Settings. Collapsed by default so reference text does not
+   dominate a 240px popover; open, it is the whole story. */
+.conformance-block { font-size: var(--fs-label); color: var(--text-dim); line-height: 1.5; }
+.conformance-block > summary {
+  color: var(--text);
+  cursor: pointer;
+  padding: 3px 0;
+  list-style-position: inside;
+}
+.conformance-block p { margin: 0 0 7px; }
+.conformance-block strong { color: var(--text); font-weight: 600; }
+.conformance-block dl { margin: 0 0 7px; }
+.conformance-block dt { color: var(--text); margin-top: 5px; }
+.conformance-block dd { margin: 0 0 0 10px; }
+
+.snapshot-wrap { background: var(--sunken); padding: 8px; }
+
+/* Taller than the old strip: this is a loupe now, and a magnified square of
+   pixels needs room to be readable. */
+.snapshot-frame {
+  position: relative;
+  width: 100%;
+  height: 124px;
+  background: #2f2f2f;
+  border-radius: 2px;
+  overflow: hidden;
+  /*
+    NO height transition, deliberately.
+
+    The pane must be at full height BEFORE anything is drawn into it, because the
+    canvas takes its backing store from the element. With a 120ms transition,
+    classList.remove('idle') left clientHeight at 26 for the next frame — so a
+    render arriving quickly was rasterised into a 26px store and then CSS-
+    stretched over 124px. One screen pixel spanned five canvas rows, and a click
+    to sample landed on a pixel nobody could see. It only ever worked because
+    captures usually took longer than the animation.
+  */
+}
+/*
+  A THIN STRIP WHEN NOTHING IS BEING SAMPLED.
+
+  At full height this pane is 124px of empty grey displaying one sentence, and
+  it sat above everything — which is why the verdict used to begin 420px down a
+  660px panel. Collapsed it keeps the eyedropper's home visible without spending
+  a fifth of the panel on a message.
+
+  Height only, so nothing reflows sideways and the canvas keeps its coordinate
+  space; drawPreview resizes the backing store on every draw regardless.
+*/
+.snapshot-frame.idle { height: 26px; }
+.snapshot-frame.idle .snapshot-empty { font-size: 10px; padding: 0 8px; }
+/*
+  The readout reserves 15px so the panel does not jitter as it updates twenty-
+  five times a second while tracking. Idle it has nothing to say, and that
+  reservation is just dead space above the verdict.
+*/
+.snapshot-frame.idle ~ .pick-hint { min-height: 0; margin-top: 0; }
+.snapshot-frame.picking { cursor: crosshair; }
+/*
+  While the loupe is tracking, the pointer is out over the artboard and the panel
+  is only a readout — a live edge is the one signal that it is armed.
+
+  It has to be its own layer. As an inset box-shadow on the frame it was painted
+  UNDERNEATH the canvas, which fills the frame exactly, so the ring never
+  appeared at all: the single most important piece of state feedback in the panel
+  rendered as nothing. A pseudo-element stacks above the canvas instead.
+*/
+.snapshot-frame.tracking::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 2px var(--accent);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* No object-fit: the canvas backing store is sized to the element on every
+   draw, so letterboxing here would only desynchronise click coordinates from
+   the pixels underneath them. */
+#snapshot { display: block; width: 100%; height: 100%; }
+
+.marker {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 1.5px solid #fff;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.55);
+}
+.marker-bg { border-color: var(--accent); }
+
+.snapshot-tools {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+/* Auto is a switch, not a label: lit while the panel is reading the artwork,
+   dimmed the moment either colour is overridden by hand. */
+.chip {
+  background: #3f3f3f;
+  color: var(--text-dim);
+  border: 0;
+  font-family: inherit;
+  font-size: var(--fs-label);
+  padding: 4px 9px;
+  border-radius: 3px;
+  min-height: 24px;
+}
+
+/* The target level, in the header, because it is what every verdict on screen
+   means. Lit for AAA so the stricter setting is the one that stands out. */
+.level-chip { margin-right: 6px; padding: 3px 7px; }
+.chip.on { background: var(--accent); color: #fff; }
+.chip.off { background: #3a3a3a; color: var(--text-faint); }
+.chip.off:hover { background: var(--btn); color: var(--text-dim); }
+
+/* A dot on the button whose colour you replaced — provenance where it belongs,
+   rather than in a label that has to change its wording to say it. */
+.pick-btn { display: inline-flex; align-items: center; gap: 5px; }
+.pick-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, .35);
+  background: transparent;
+  display: none;
+}
+.pick-dot.set { display: block; }
+/* The eyedropper, inside the button that arms it. Without it these read as slot
+   selectors and people press the separate eyedropper afterwards — a second step
+   the tool never needed. Dimmed so the word stays the label and this stays a
+   hint. */
+.pick-tip { opacity: .65; margin-left: -1px; flex-shrink: 0; }
+.pick-btn.on .pick-tip { opacity: 1; }
+.spacer { flex: 1; }
+/* Its own line. In the tools row this was competing with five controls inside
+   240px and showing about five characters. */
+.pick-hint {
+  margin-top: 5px;
+  min-height: 15px;
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+.pick-hint .live-ratio { color: var(--text); }
+.pick-hint .live-hex { color: var(--text); }
+.pick-hint .live-fail { color: var(--fail); }
+.pick-hint .live-pass { color: var(--pass); }
+
+.tool-btn {
+  background: var(--btn);
+  border: 0;
+  color: var(--text);
+  font-size: var(--fs-label);
+  padding: 5px 10px;
+  border-radius: 3px;
+  min-height: 22px;
+}
+.tool-btn:hover { background: var(--btn-hover); }
+.tool-btn.on { background: var(--accent); color: #fff; }
+.tool-btn.wide { width: 100%; padding: 6px; }
+
+.notice {
+  background: var(--warn-bg);
+  border-left: 2px solid var(--warn);
+  color: var(--warn-text);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  padding: 6px 10px;
+}
+/*
+  A standing caveat, not a problem.
+
+  The CMYK note is true of every reading in a print document for as long as it
+  is open. Given the warning treatment it sat above the fold in amber forever
+  and competed with the notices that mean "this number is wrong" — so it read as
+  an alarm nobody could clear. Same slot, quieter voice.
+*/
+.notice.soft {
+  background: transparent;
+  border-left-color: var(--line-soft);
+  color: var(--text-dim);
+  padding: 4px 10px 0;
+}
+
+/*
+  COLOUR SLIDERS, ONE COLUMN PER SWATCH.
+
+  Two columns inside 240px is 118px each, so the key letter is a single
+  character and the track takes everything else. Illustrator's own colour panel
+  is the reference: people already know this control.
+*/
+.sliders {
+  display: flex;
+  gap: 1px;
+  background: var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.slider-col {
+  flex: 1 1 0;
+  min-width: 0;
+  background: var(--bg);
+  padding: 6px 8px 7px;
+}
+.slider-row { display: flex; align-items: center; gap: 5px; }
+.slider-key {
+  font-size: 9px;
+  color: var(--text-dim);
+  width: 7px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.slider-note {
+  font-size: 9px;
+  color: var(--text-faint);
+  margin-top: 3px;
+  min-height: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The marks layer has to sit over the track without eating the drag. */
+.track-wrap { position: relative; flex: 1; min-width: 0; display: block; }
+.marks { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; }
+/*
+  A compliance threshold, drawn ON the track. Click-through is off for the layer
+  and back on for each mark, so the tick is a target you can hit.
+*/
+.mark {
+  position: absolute;
+  top: 2px;
+  width: 2px;
+  height: 12px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--text);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.mark.aa { background: var(--accent-text); }
+.mark.aaa { background: var(--pass); }
+/* The stretch of the track that clears the current target, so the passing
+   region is visible before the first drag rather than found by hunting. */
+.zone {
+  position: absolute;
+  top: 6px;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--pass);
+  opacity: .55;
+}
+
+.sliders input[type=range] {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  height: 16px;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.sliders input[type=range]::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--sunken);
+  border: 1px solid var(--line);
+}
+.sliders input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--text);
+  border: 1px solid var(--line);
+  cursor: grab;
+}
+.sliders input[type=range]:active::-webkit-slider-thumb { cursor: grabbing; }
+.sliders input[type=range]:disabled { opacity: .35; }
+.sliders input[type=range]:disabled::-webkit-slider-thumb { cursor: not-allowed; }
+
+.swatch-row { display: flex; gap: 1px; background: var(--line); }
+.swatch {
+  flex: 1;
+  height: 38px;
+  position: relative;
+  background: #808080;
+  cursor: copy;
+}
+/*
+  ONE FOCUS INDICATOR, EVERYWHERE, THAT PASSES ITS OWN CHECK.
+
+  There used to be exactly one focus style in this file — a 2px accent-blue
+  outline drawn INSIDE the swatch, on top of whatever colour the user is
+  checking. Measured against the artwork it sits on, that was 2.44:1 on a white
+  swatch and 1.69:1 on a teal one; SC 1.4.11 asks for 3:1. Every other control
+  in a panel built to catch this had no focus style at all.
+
+  A ring cannot pass against a colour the user chooses, so do not try: draw it
+  OUTSIDE the element, on the panel's own chrome, where the contrast is known —
+  and put a dark halo under it so it survives landing on a light surface too.
+  White on --bar is 11.6:1; the dark halo carries the rest.
+*/
+:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, .75);
+}
+/* The swatch fills its row edge to edge, so an outside ring would be clipped.
+   Inset it, but keep the dark halo so it never has to rely on the artwork. */
+.swatch:focus-visible {
+  outline-offset: -3px;
+  box-shadow: inset 0 0 0 5px rgba(0, 0, 0, .75);
+}
+/* A brief flash, so a copy that succeeded is visible without a toast. */
+.swatch.copied::after {
+  content: "copied";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 115, 230, .92);
+  color: #fff;
+  font-size: var(--fs-label);
+}
+.hex {
+  position: absolute;
+  left: 6px;
+  bottom: 3px;
+  font-size: var(--fs-label);
+  text-shadow: 0 0 3px rgba(0,0,0,.5);
+}
+.swatch-labels {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px 0;
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+}
+.swatch-labels span { flex: 1; }
+
+.verdict-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 10px 4px;
+}
+/*
+  The note gets its own full-width line beneath.
+
+  Sharing the row with the matrix left it about 110px, which is not enough for
+  "12pt body text · needs 4.5" — it wrapped onto a second line and pushed into
+  the matrix. Nothing is gained by squeezing it up there.
+*/
+.verdict-left { flex: 1 1 auto; min-width: 0; }
+.matrix { flex: 0 0 auto; }
+.verdict-note { padding: 0 10px 10px; margin-top: 0; }
+.ratio-line { display: flex; align-items: baseline; gap: 3px; }
+.ratio { font-size: 34px; line-height: 1; color: var(--text-dim); }
+.ratio.pass { color: var(--pass); }
+.ratio.fail { color: var(--fail); }
+.ratio-suffix { font-size: 12px; color: var(--text-dim); }
+.note { font-size: var(--fs-label); color: var(--text-dim); line-height: 1.45; margin-top: 4px; }
+.dim { color: var(--text-faint); }
+
+.matrix { border-collapse: collapse; font-size: var(--fs-label); }
+.matrix th { color: var(--text-dim); font-weight: normal; padding: 0 4px 2px; }
+.matrix td { padding: 2px 5px; color: #b0b0b0; text-align: center; }
+/* Row labels are <th scope="row"> so screen readers announce each result with
+   the size it belongs to; they still need to read as a left-hand column. */
+.matrix th[scope="row"] { text-align: left; padding: 2px 6px 2px 0; }
+.matrix .yes { color: var(--pass); }
+.matrix .no { color: var(--fail); }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.block { border-top: 1px solid var(--line-soft); padding: 9px 10px; }
+/* Wraps instead of colliding: at 220px the title and the target link were
+   overlapping each other mid-word. */
+.block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-dim);
+  margin-bottom: 7px;
+}
+.fixes { display: flex; gap: 5px; }
+.fix {
+  flex: 1;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0;
+  background: #444;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+}
+.fix:hover, .fix.sel { border-color: #cfe6ff; }
+
+/*
+  A RUNG, NOT A SHADE.
+
+  Three of these — 3:1, 4.5:1, 7:1 — so each gets a third of the row and can
+  carry both the ratio it achieves and the rung it is. Taller than the old strip
+  because it now says two things instead of one, and there are three of them
+  rather than five.
+*/
+.fix.rung {
+  height: 34px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+.rung-ratio {
+  font-size: var(--fs-label);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+/* Sits below the colour on a strip of chrome, so it reads whatever the swatch
+   above it happens to be. */
+.rung-label {
+  font-size: 9px;
+  line-height: 1;
+  color: #fff;
+  background: rgba(0, 0, 0, .55);
+  border-radius: 2px;
+  padding: 1px 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Already cleared, or out of reach: an outline rather than a colour, because
+   there is no colour to show and pretending otherwise invites a click. */
+.fix.rung.done,
+.fix.rung.blocked {
+  border-color: var(--line-soft);
+  cursor: default;
+}
+.fix.rung.done .rung-ratio { color: var(--pass); font-size: var(--fs-body); }
+.fix.rung.done .rung-label,
+.fix.rung.blocked .rung-label { background: none; color: var(--text-dim); }
+.fix.rung.blocked .rung-ratio { color: var(--text-faint); }
+.fix.rung.done:hover,
+.fix.rung.blocked:hover { border-color: var(--line-soft); }
+
+/* Why a rendered colour is not the authored one. Grouping is how people
+   organise work; it should not cost them an explanation. */
+.appearance-note {
+  margin: 0 10px;
+  padding: 7px 9px;
+  background: #34302a;
+  border-left: 2px solid var(--warn);
+  color: var(--warn-text);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+}
+.appearance-note .link-btn { display: block; margin-top: 4px; color: var(--warn-text); }
+.appearance-note .link-btn:hover { color: #fff; }
+/* The outlined type note ends "Grade it as" and offers two answers in the
+   sentence, so its buttons sit inline rather than each on a line of its own. */
+#outline-note .link-btn { display: inline-block; margin: 2px 10px 0 0; }
+#outline-note span { margin-right: 4px; }
+
+/* The outcome line, on its own. Empty most of the time, so it reserves nothing
+   until there is something to say. */
+.standalone-note:empty { display: none; }
+.standalone-note { padding: 6px 10px 0; }
+
+/* The verdict line, when the artwork does not clear the target. Colour alone
+   is never the signal — the word "needs" carries it — but the two agreeing
+   makes the state readable at a glance. */
+.verdict-note.verdict-short { color: var(--fail); }
+.options {
+  border-top: 1px solid var(--line);
+  background: #3d3d3d;
+  padding: 4px 0 10px;
+}
+.opt-group { padding: 8px 10px 0; }
+.opt-label { font-size: var(--fs-label); color: var(--text-dim); margin-bottom: 5px; }
+.seg { display: flex; gap: 4px; }
+.seg button {
+  flex: 1;
+  background: var(--btn);
+  border: 0;
+  color: var(--text-on-btn);
+  font-size: var(--fs-label);
+  padding: 5px 0;
+  border-radius: 3px;
+}
+.seg button.on { background: var(--accent); color: #fff; }
+
+.opt-check {
+  display: flex;
+  gap: 8px;
+  padding: 10px 10px 0;
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+.opt-check input { margin: 2px 0 0; }
+.opt-check em { display: block; font-style: normal; font-size: var(--fs-label); color: var(--text-dim); margin-top: 2px; }
+.options .note { padding: 8px 10px 0; }
+
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: var(--fs-label);
+  font-family: inherit;
+  color: var(--text-faint);
+  text-decoration: underline dotted;
+}
+.link-btn:hover { color: var(--accent-text); }
+
+/*
+  Who made it. Last thing in the popover, nothing in the main view.
+
+  The links wrap rather than sitting on one row, because at the panel's 220px
+  minimum two of them do not fit and a credit line is not worth a scrollbar.
+*/
+.credit {
+  color: var(--text-dim);
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  padding-top: 12px;
+}
+.credit-links { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 3px; }
+.credit-version { display: block; margin-top: 4px; }
+
+
+.tool-btn.on, .icon-btn.on { background: var(--accent); color: #fff; }
+
+.snapshot-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 14px;
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  color: #a0a0a0;   /* 4.99 on the pane below it; #8f8f8f was 4.14 */
+  background: #2f2f2f;
+  pointer-events: none;
+}
+
+/* Options popover — modelled on Illustrator's own panel menus: anchored under
+   the gear, floating over the content, dismissed by clicking away or Esc. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .35);
+  z-index: 40;
+}
+.popover {
+  position: absolute;
+  top: 30px;
+  right: 8px;
+  left: 8px;
+  z-index: 50;
+  background: #3d3d3d;
+  border: 1px solid #1e1e1e;
+  border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .5);
+  padding: 0 0 10px;
+  max-height: calc(100vh - 46px);
+  overflow-y: auto;
+}
+.popover-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 10px;
+  border-bottom: 1px solid #4a4a4a;
+  font-size: var(--fs-body);
+  color: var(--text);
+  position: sticky;
+  top: 0;
+  background: #3d3d3d;
+}
+.popover-head span { flex: 1; }
+.bar { position: relative; }
+
+/* Capture problems live here, not in the transient hint. A background preview
+   completing must never wipe the explanation for something the user just did. */
+.capture-note {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: var(--warn-bg);
+  border-left: 2px solid var(--warn);
+  color: var(--warn-text);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  -webkit-user-select: text;
+  user-select: text;
+}

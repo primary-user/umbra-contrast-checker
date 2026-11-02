@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Install help
+    url: https://github.com/primary-user/umbra-contrast-checker/blob/main/INSTALL.md
+    about: Covers the installers, a way in without one, and the fix for a blank panel.
+  - name: Report a security problem privately
+    url: https://github.com/primary-user/umbra-contrast-checker/security/advisories/new
+    about: Please use this rather than a public issue for anything that could be exploited.

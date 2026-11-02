@@ -1,0 +1,211 @@
+name: release
+
+# Builds the two signed .zxp files and publishes them as a GitHub release.
+#
+# Start it from the Actions tab with Run workflow, and it releases whatever
+# version CSXS/manifest.xml says. Pushing a tag such as v1.12.0 does the same,
+# and the tag has to match the manifest.
+#
+# The five test suites run first, and nothing is built if one fails. The macOS
+# .zxp is built on a Mac and the Windows one on Windows, because Adobe's
+# guidance is to sign on the platform the file will be installed on. Both are
+# attached under fixed names, so the download links in the README always point
+# at the newest release.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check the version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Read the version and make sure it is new
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "branch" ] && [ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::Releases are made from $DEFAULT_BRANCH. Pick it in the branch list on Run workflow."
+            exit 1
+          fi
+
+          version="$(sed -n 's/.*ExtensionBundleVersion="\([^"]*\)".*/\1/p' CSXS/manifest.xml)"
+          if [ -z "$version" ]; then
+            echo "::error::Could not read ExtensionBundleVersion from CSXS/manifest.xml."
+            exit 1
+          fi
+
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::The tag is $GITHUB_REF_NAME, but CSXS/manifest.xml says $version."
+            exit 1
+          fi
+
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "::error::v$version is already released. Raise the version in CSXS/manifest.xml first."
+            exit 1
+          fi
+
+          if ! grep -qxF "## $version" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $version' heading to use for the release notes."
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version"
+
+  tests:
+    name: Tests
+    uses: ./.github/workflows/test.yml
+
+  build:
+    name: Build for ${{ matrix.platform }}
+    needs: [check, tests]
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            os: macos-latest
+          - platform: Windows
+            os: windows-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # Git on Windows converts line endings on checkout, which breaks the shell
+      # scripts and changes the files inside the .zxp. .gitattributes already
+      # asks for LF everywhere. This makes sure.
+      - name: Keep line endings as committed
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      # Adobe ships ZXPSignCmd for Intel Macs only. GitHub's Macs are Apple
+      # silicon, which runs it through Rosetta.
+      - name: Install Rosetta
+        if: runner.os == 'macOS'
+        run: |
+          if [ "$(uname -m)" = "arm64" ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+
+      - name: Fetch Adobe's signing tool
+        run: bash tools/get-zxpsigncmd.sh
+
+      - name: Build and sign
+        env:
+          UMBRA_CERT_P12: ${{ secrets.UMBRA_CERT_P12 }}
+          UMBRA_CERT_PASSWORD: ${{ secrets.UMBRA_CERT_PASSWORD }}
+          UMBRA_ZXP: dist/UmbraContrastChecker-${{ matrix.platform }}.zxp
+        run: |
+          # A certificate of your own, if one is saved in the repository's
+          # secrets. Without one, package.sh signs with a throwaway certificate.
+          if [ -n "$UMBRA_CERT_P12" ]; then
+            node -e "require('fs').writeFileSync(process.argv[1], Buffer.from(process.env.UMBRA_CERT_P12, 'base64'))" ../release-cert.p12
+            UMBRA_CERT="$(cd .. && pwd)/release-cert.p12"
+            export UMBRA_CERT
+          fi
+          bash tools/package.sh
+
+      - name: Remove the certificate
+        if: always()
+        run: rm -f ../release-cert.p12
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: zxp-${{ matrix.platform }}
+          path: dist/UmbraContrastChecker-${{ matrix.platform }}.zxp
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish the release
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: zxp-*
+          path: dist
+          merge-multiple: true
+
+      - name: Write the release notes
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ## Install
+
+          1. Download the file for your computer from **Assets** below.
+             Mac: `UmbraContrastChecker-macOS.zxp`. Windows: `UmbraContrastChecker-Windows.zxp`.
+          2. Open it with a free ZXP installer, such as [ZXP Installer](https://aescripts.com/learn/zxp-installer/) or [Anastasiy's Extension Manager](https://install.anastasiy.com/).
+          3. Restart Illustrator, then open **Window > Extensions > Umbra Contrast Checker**.
+
+          Needs Illustrator 2020 (24.0) or newer. Full guide and fixes in [INSTALL.md](https://github.com/@REPO@/blob/HEAD/INSTALL.md).
+
+          ## What changed
+
+          NOTES
+
+          awk -v heading="## $VERSION" '
+            $0 == heading { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md >> notes.md
+
+          cat >> notes.md <<'NOTES'
+
+          ---
+
+          Free from [Artchemy Labs](https://artchemylabs.com). If it saves you an afternoon, you can [support it on Ko-fi](https://ko-fi.com/artchemylabs).
+          NOTES
+
+          sed -i "s|@REPO@|$GITHUB_REPOSITORY|g" notes.md
+          cat notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          cd dist
+          sha256sum UmbraContrastChecker-macOS.zxp UmbraContrastChecker-Windows.zxp > SHA256SUMS.txt
+          gh release create "v$VERSION" \
+            UmbraContrastChecker-macOS.zxp \
+            UmbraContrastChecker-Windows.zxp \
+            SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "Umbra Contrast Checker $VERSION" \
+            --notes-file ../notes.md

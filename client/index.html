@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  Umbra Contrast Checker
+  Copyright (c) 2026 Artchemy Labs LLC. All rights reserved.
+  Use of this file is governed by the licence in LICENSE at the root of this
+  project. Not for redistribution.
+-->
+<meta charset="utf-8">
+<title>Umbra Contrast Checker</title>
+<link rel="stylesheet" href="css/panel.css">
+</head>
+<body>
+
+<header class="bar">
+  <span class="bar-title">Contrast</span>
+  <!-- The target level is what every verdict on screen means, so it cannot live
+       only inside the gear popover. Two states, one click to switch. -->
+  <button id="level-chip" class="chip level-chip" aria-pressed="false"
+          title="Target level, click for AAA">AA</button>
+  <span id="status-dot" class="status">idle</span>
+  <button id="btn-options" class="icon-btn" aria-label="Panel options"
+          aria-haspopup="dialog" aria-expanded="false" title="Panel options">
+    <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d="M11.6 1h-3.2l-.4 2.3-1.5.9L4.3 3.3 2.7 6l1.8 1.5v1.9L2.7 11l1.6 2.7 2.2-.9 1.5.9.4 2.3h3.2l.4-2.3 1.5-.9 2.2.9L17.3 11l-1.8-1.6V7.5L17.3 6l-1.6-2.7-2.2.9-1.5-.9L11.6 1zm-1.6 5.4a3.1 3.1 0 1 1 0 6.2 3.1 3.1 0 0 1 0-6.2z"/>
+    </svg>
+  </button>
+</header>
+
+<!-- The panel repaints off a poll, with no user action to explain it. This is
+     the only thing that tells a screen reader the verdict changed; it is spoken
+     once per settled reading, not once per loupe frame. -->
+<div id="live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+
+<!--
+  The standard, stated on the face of the panel.
+
+  Every number below is measured against these three success criteria, and a
+  compliance reviewer should not have to open a menu to find out which. The full
+  wording, the thresholds and the backwards-compatibility note live in Settings.
+-->
+<div class="conformance">
+  WCAG 2.2 AA &middot; SC 1.4.3 &middot; 1.4.6 &middot; 1.4.11
+</div>
+
+<section class="view-main">
+
+  <div class="snapshot-wrap">
+    <div id="snapshot-frame" class="snapshot-frame">
+      <canvas id="snapshot" width="1" height="1"></canvas>
+      <div id="marker-fg" class="marker marker-fg" hidden></div>
+      <div id="marker-bg" class="marker marker-bg" hidden></div>
+      <div id="snapshot-empty" class="snapshot-empty">Eyedrop any colour on screen</div>
+    </div>
+    <div class="snapshot-tools">
+      <button id="mode-chip" class="chip" title="Read both colours from the artwork automatically">Auto</button>
+      <!--
+        The eyedropper glyph is the affordance. Labelled "Text" and "Bg" alone,
+        with a separate eyedropper button beside them, these read as slot
+        selectors — so people pressed one, then pressed the eyedropper, and
+        learned a two-step gesture the tool never required.
+      -->
+      <button id="btn-pick-fg" class="tool-btn pick-btn"
+              title="Eyedrop the text colour, starts sampling straight away">
+        <span class="pick-dot" id="dot-fg"></span>Text
+        <svg class="pick-tip" viewBox="0 0 20 20" width="11" height="11" aria-hidden="true" focusable="false">
+          <path fill="currentColor" d="M16.9 3.1a2.6 2.6 0 0 0-3.7 0l-1 1-.8-.8-1.4 1.4.8.8-6.5 6.5a2 2 0 0 0-.5.9L3 16.1a.7.7 0 0 0 .9.9l3.2-.8c.35-.1.66-.28.9-.52l6.5-6.5.8.8 1.4-1.4-.8-.8 1-1a2.6 2.6 0 0 0 0-3.7zM6.1 14.3l-1.4.35.35-1.4L11.3 7l1.05 1.05-6.25 6.25z"/>
+        </svg></button>
+      <button id="btn-pick-bg" class="tool-btn pick-btn"
+              title="Eyedrop the background colour, starts sampling straight away">
+        <span class="pick-dot" id="dot-bg"></span>Bg
+        <svg class="pick-tip" viewBox="0 0 20 20" width="11" height="11" aria-hidden="true" focusable="false">
+          <path fill="currentColor" d="M16.9 3.1a2.6 2.6 0 0 0-3.7 0l-1 1-.8-.8-1.4 1.4.8.8-6.5 6.5a2 2 0 0 0-.5.9L3 16.1a.7.7 0 0 0 .9.9l3.2-.8c.35-.1.66-.28.9-.52l6.5-6.5.8.8 1.4-1.4-.8-.8 1-1a2.6 2.6 0 0 0 0-3.7zM6.1 14.3l-1.4.35.35-1.4L11.3 7l1.05 1.05-6.25 6.25z"/>
+        </svg></button>
+      <span class="spacer"></span>
+      <button id="btn-camera" class="icon-btn" aria-label="Eyedropper"
+              title="Eyedropper. Magnifies the pixels around the pointer. Move over any colour on screen, press Enter to lock it, Esc to cancel.">
+        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" focusable="false">
+          <path fill="currentColor" d="M16.9 3.1a2.6 2.6 0 0 0-3.7 0l-1 1-.8-.8-1.4 1.4.8.8-6.5 6.5a2 2 0 0 0-.5.9L3 16.1a.7.7 0 0 0 .9.9l3.2-.8c.35-.1.66-.28.9-.52l6.5-6.5.8.8 1.4-1.4-.8-.8 1-1a2.6 2.6 0 0 0 0-3.7zM6.1 14.3l-1.4.35.35-1.4L11.3 7l1.05 1.05-6.25 6.25z"/>
+        </svg>
+      </button>
+    </div>
+    <!-- The live readout needs a full-width line of its own. Sharing the tools
+         row left it about five characters wide in a docked panel. -->
+    <div id="pick-hint" class="pick-hint"></div>
+    <div id="capture-note" class="capture-note" hidden></div>
+  </div>
+
+  <!--
+    THE VERDICT COMES FIRST.
+
+    It used to begin 420px down the panel, below the loupe, the swatches and
+    the sliders — so anyone docking this narrower than full height never saw
+    the number without scrolling, and the three parts of one editing job
+    (swatches, sliders, rungs) were split apart by the answer sitting in the
+    middle of them. Diagnosis, then treatment.
+  -->
+  <div class="verdict-row">
+    <div class="verdict-left">
+      <div class="ratio-line">
+        <!-- The suffix is hidden with the number. ":1" beside a placeholder dot
+             reads as a rendering fault, not as "nothing measured yet". -->
+        <span id="ratio" class="ratio">&middot;</span><span id="ratio-suffix" class="ratio-suffix" hidden>:1</span>
+      </div>
+    </div>
+    <table class="matrix">
+      <caption class="sr-only">Contrast result by text size and conformance level</caption>
+      <tr><td></td><th scope="col">AA</th><th scope="col">AAA</th></tr>
+      <tr><th scope="row">Normal</th><td id="m-normal-aa">&middot;</td><td id="m-normal-aaa">&middot;</td></tr>
+      <tr><th scope="row">Large</th><td id="m-large-aa">&middot;</td><td id="m-large-aaa">&middot;</td></tr>
+      <tr><th scope="row">Icons</th><td id="m-graphic-aa">&middot;</td><td class="dim">n/a</td></tr>
+    </table>
+  </div>
+  <!-- Full width: sharing the row with the matrix left it too narrow to hold
+       "12pt body text · needs 4.5" on one line. -->
+  <div id="ratio-note" class="note verdict-note">Select artwork on the artboard</div>
+
+  <!-- Hidden entirely when there is nothing to suggest: a header reading
+       "Fixes · click to apply" over an empty box was the panel's answer to
+       every blank state — nothing selected, a gradient, a placed image. -->
+  <!-- Everything that qualifies the number, next to the number. -->
+  <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+  <div id="appearance-note" class="appearance-note" hidden></div>
+  <!-- Asks when a "graphic" is shaped like outlined type. -->
+  <div id="outline-note" class="appearance-note" hidden></div>
+
+  <!-- One colour section: the two swatches, each above its own sliders. -->
+  <div class="swatch-row">
+    <div id="swatch-fg" class="swatch"><span id="hex-fg" class="hex">&middot;</span></div>
+    <div id="swatch-bg" class="swatch"><span id="hex-bg" class="hex">&middot;</span></div>
+  </div>
+  <div class="swatch-labels">
+    <span>Text</span>
+    <span>Background</span>
+  </div>
+
+  <!--
+    Hue, saturation and brightness under each colour, the way Illustrator's own
+    colour panel works — because the answer to "this fails" is usually "let me
+    adjust it", not "pick one of five shades I chose for you".
+
+    The brightness track carries the compliance thresholds as marks, so the
+    passing stretch is visible before you touch it. Dragging previews in the
+    panel; letting go writes to the artwork once, as one undo step.
+  -->
+  <div class="sliders">
+    <div class="slider-col">
+      <div class="slider-row">
+        <span class="slider-key">H</span>
+        <input type="range" id="fg-h" min="0" max="360" step="1" aria-label="Text hue">
+      </div>
+      <div class="slider-row">
+        <span class="slider-key">S</span>
+        <input type="range" id="fg-s" min="0" max="100" step="1" aria-label="Text saturation">
+      </div>
+      <div class="slider-row">
+        <span class="slider-key">B</span>
+        <span class="track-wrap">
+          <input type="range" id="fg-b" min="0" max="100" step="1" aria-label="Text brightness">
+          <span class="marks" id="fg-marks" aria-hidden="true"></span>
+        </span>
+      </div>
+      <div class="slider-note" id="fg-slider-note"></div>
+    </div>
+
+    <div class="slider-col">
+      <div class="slider-row">
+        <span class="slider-key">H</span>
+        <input type="range" id="bg-h" min="0" max="360" step="1" aria-label="Background hue">
+      </div>
+      <div class="slider-row">
+        <span class="slider-key">S</span>
+        <input type="range" id="bg-s" min="0" max="100" step="1" aria-label="Background saturation">
+      </div>
+      <div class="slider-row">
+        <span class="slider-key">B</span>
+        <span class="track-wrap">
+          <input type="range" id="bg-b" min="0" max="100" step="1" aria-label="Background brightness">
+          <span class="marks" id="bg-marks" aria-hidden="true"></span>
+        </span>
+      </div>
+      <div class="slider-note" id="bg-slider-note"></div>
+    </div>
+  </div>
+  <!-- Named when an item's rendered colour is not its authored fill. -->
+  <div id="fix-block" class="block">
+    <div class="block-head">
+      <!-- Shown only when the brightness slider cannot reach the target at this
+           hue, so the row's presence is itself the message. -->
+      <span>No brightness passes &middot; try these</span>
+      <button id="fix-target" class="link-btn" title="Click to change the other colour instead"></button>
+    </div>
+    <div id="fixes" class="fixes"></div>
+  </div>
+
+  <!--
+    OUTSIDE the fix block, deliberately.
+
+    This is where every outcome lands: what was written to the artwork, which
+    object changed, why a colour could not be applied. Inside #fix-block it was
+    hidden exactly when it mattered most — a successful edit hides the block
+    (nothing left to fix), and so hid the sentence naming what just changed; and
+    "no fill renders as X through this object's opacity" was never once shown,
+    because that message only occurs in the state where the block is hidden.
+  -->
+  <div id="fix-note" class="note standalone-note"></div>
+
+</section>
+
+<div id="options-scrim" class="scrim" hidden></div>
+
+<div id="options" class="options popover" role="dialog" aria-modal="true"
+     aria-label="Panel options" hidden>
+  <div class="popover-head">
+    <span>Panel options</span>
+    <button id="btn-options-close" class="icon-btn" aria-label="Close options">&#10005;</button>
+  </div>
+  <div class="opt-group">
+    <div class="opt-label">Target level</div>
+    <div class="seg" id="seg-level">
+      <button data-value="AA" class="on">AA</button>
+      <button data-value="AAA">AAA</button>
+    </div>
+  </div>
+
+  <!-- What counts as large text. WCAG's sizes are CSS points, so on screen
+       large starts at 24px, or 18.66px bold; in print it is 18pt, or 14pt bold.
+       Auto reads the document: RGB is screen, CMYK is print. -->
+  <div class="opt-group">
+    <div class="opt-label" title="Screen: large text is 24px, or 18.66px bold. Print: 18pt, or 14pt bold. Auto uses Screen for RGB documents and Print for CMYK.">Medium</div>
+    <div class="seg" id="seg-medium">
+      <button data-value="auto" class="on">Auto</button>
+      <button data-value="screen">Screen</button>
+      <button data-value="print">Print</button>
+    </div>
+  </div>
+
+  <div class="opt-group">
+    <div class="opt-label">Treat text as</div>
+    <div class="seg" id="seg-size">
+      <button data-value="auto" class="on">Auto</button>
+      <button data-value="normal">Body</button>
+      <button data-value="large">Large</button>
+      <button data-value="graphic">Icon</button>
+    </div>
+  </div>
+
+  <label class="opt-check">
+    <input type="checkbox" id="opt-rendered" checked>
+    <span>
+      Measure rendered colour
+      <em>Applies opacity and blend modes</em>
+    </span>
+  </label>
+
+  <!--
+    A <details>, so the popover is not dominated by reference text on a 240px
+    panel. Native disclosure: keyboard-operable and announced, for free.
+  -->
+  <!--
+    Short on purpose. This exists so a compliance reviewer can see what standard
+    the numbers are measured to without leaving the panel; anyone who needs the
+    specification itself gets a link to it rather than a transcription of it.
+  -->
+  <details class="opt-group conformance-block">
+    <summary>Conformance, WCAG 2.2 AA</summary>
+    <p>W3C Recommendation, December&nbsp;2024. Three success criteria:</p>
+    <dl>
+      <dt>1.4.3 Contrast (Minimum) &middot; AA</dt>
+      <dd>4.5:1 text &middot; 3:1 large text</dd>
+      <dt>1.4.6 Contrast (Enhanced) &middot; AAA</dt>
+      <dd>7:1 text &middot; 4.5:1 large text</dd>
+      <dt>1.4.11 Non-text Contrast &middot; AA</dt>
+      <dd>3:1 icons and controls</dd>
+    </dl>
+    <p>Large text is 24px, or 18.66px bold, on screen, and 18pt, or 14pt bold,
+       in print. WCAG means CSS points, and 18 of those are 24 pixels.
+       Conforming to 2.2 also conforms to WCAG&nbsp;2.1 and 2.0.</p>
+    <button id="btn-wcag-link" class="link-btn">Read the specification &#8599;</button>
+  </details>
+
+  <div id="doc-note" class="note"></div>
+
+  <!--
+    Who made it.
+
+    In the popover on purpose. The main view is 240px of measurement, and a
+    credit line there would cost a row of it every time the panel is open.
+
+    Buttons, not <a href>. A CEP panel is a chrome-less webview, so a real link
+    navigates the PANEL to the page and the extension is simply gone, with no
+    back button — the same reason the specification link above is a button.
+  -->
+  <div class="opt-group credit">
+    Developed by Artchemy Labs
+    <span class="credit-links">
+      <button id="btn-site" class="link-btn">artchemylabs.com &#8599;</button>
+      <button id="btn-kofi" class="link-btn">Support on Ko-fi &#8599;</button>
+    </span>
+    <!-- The version, for anyone filing a bug. Filled in from the host, so it
+         names the code that is actually running, not the code in the repo. -->
+    <span id="panel-version" class="credit-version"></span>
+  </div>
+</div>
+
+<script src="js/color.js"></script>
+<script src="js/cep.js"></script>
+<script src="js/panel.js"></script>
+</body>
+</html>

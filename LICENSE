@@ -1,0 +1,186 @@
+Umbra Contrast Checker Source-Available License
+Version 1.0, 2026
+
+Copyright (c) 2026 Artchemy Labs LLC. All rights reserved.
+
+
+IN PLAIN TERMS
+
+  Yes, you can use it. Free, forever, for anything, including paid client work,
+  on every machine at your company. No fee, no account, no seat count.
+
+  Yes, you can read and change it. The source is public so you can audit an
+  accessibility tool before you trust its numbers, and you can modify your own
+  copy to suit how you work.
+
+  No, you cannot hand it out or sell it. Not the source, not a build, not a
+  renamed version, not on a marketplace, not bundled into something you charge
+  for. Send people the official link instead.
+
+The sections below are what actually governs. This summary is here because the
+people who use this tool are designers, not lawyers, and a licence nobody reads
+protects nobody.
+
+This is source-available software. It is not open source.
+
+
+1. DEFINITIONS
+
+"Software" means Umbra Contrast Checker, including its source code, its
+compiled or packaged forms, and its documentation.
+
+"We" and "Us" mean Artchemy Labs LLC. "You" means the person or organization
+exercising the rights below.
+
+"Your Organization" means the company, agency, or other legal entity You work
+for, together with its employees and contractors while they work for it.
+
+"Distribute" means to give, send, publish, post, host for download, sell, rent,
+lease, sublicense, or otherwise make available to anyone outside Your
+Organization.
+
+
+2. WHAT YOU MAY DO
+
+Subject to section 3, We grant You a worldwide, royalty-free, non-exclusive,
+non-transferable, perpetual licence to:
+
+  a. read, study, and audit the source code;
+
+  b. install and run the Software for any purpose, including personal use,
+     internal business use, and commercial use, on any number of machines You
+     or Your Organization control, including on work You are paid to produce
+     for clients;
+
+  c. modify the Software for use by You or Your Organization, and run those
+     modifications internally;
+
+  d. copy the Software for backup and for installation within Your
+     Organization;
+
+  e. fork this repository on the hosting platform where We publish it, in order
+     to read it, to experiment, or to propose a change back to Us; and
+
+  f. quote and discuss the Software and its source in articles, teaching,
+     reviews, and technical writing, with attribution.
+
+You owe Us nothing for any of this.
+
+
+3. WHAT YOU MAY NOT DO
+
+Without our prior written permission, You may not:
+
+  a. Distribute the Software, in source or packaged form, modified or
+     unmodified, whether or not You charge for it. That includes publishing a
+     build, sharing a `.zxp`, mirroring the source, and listing it on any
+     extension marketplace, plugin store, or asset site;
+
+  b. sell the Software, bundle it into a product or service You charge for, or
+     charge anyone for access to it;
+
+  c. publish or Distribute a derivative work of the Software, or a work whose
+     substance is copied from the Software;
+
+  d. remove, obscure, or alter any copyright, licence, or attribution notice,
+     in the source or in the panel's interface; or
+
+  e. use the names "Umbra Contrast Checker", "Umbra", or "Artchemy Labs", or
+     any confusingly similar name, to identify, endorse, or promote anything
+     You make.
+
+Section 2(e) permits a fork so You can read the code and propose changes. It
+does not permit You to publish that fork as a product, present it as your own,
+or offer builds from it. Those are Distribution, and section 3(a) covers them.
+
+Point people at the official repository and releases. That link is always
+permitted and always welcome.
+
+
+4. CONTRIBUTIONS
+
+If You submit a contribution to Us, whether as a pull request, a patch, or code
+in an issue, You grant Us a perpetual, worldwide, royalty-free, irrevocable
+licence to use, modify, and distribute it as part of the Software under this
+licence or any later licence We adopt, including commercially.
+
+You confirm the contribution is Yours to give and that You are not knowingly
+including anyone else's copyrighted work.
+
+You keep the copyright in what You wrote. This grants Us permission, it does not
+take Your ownership.
+
+
+5. FEEDBACK
+
+If You send Us a bug report, a suggestion, or any other feedback, We may use it
+for any purpose, with no obligation and no payment to You. Do not send Us
+anything You are not free to share.
+
+
+6. RESERVATION OF RIGHTS
+
+We keep every right this licence does not expressly grant. Nothing here
+transfers ownership of the Software or of any intellectual property in it.
+
+Publishing the source publicly does not place it in the public domain, waive our
+copyright, or grant any licence beyond the one written here.
+
+
+7. TERM AND TERMINATION
+
+This licence takes effect when You first access, download, or use the Software
+and continues until terminated.
+
+It terminates automatically if You breach section 3. On termination You must
+stop using the Software, stop Distributing anything derived from it, and delete
+Your copies other than those You must keep by law.
+
+Sections 4, 5, 6, 8, 9, 10, and 11 survive termination.
+
+If You cure a breach promptly after We notify You of it, and it is Your first
+breach, this licence is reinstated.
+
+
+8. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NONINFRINGEMENT.
+
+
+9. NO ACCESSIBILITY CERTIFICATION
+
+The Software measures colour contrast and reports the result against published
+WCAG success criteria. It is a measuring tool. It is not an audit, not a
+certification, and not legal advice.
+
+Using it does not make any artwork, document, product, or service conform to
+WCAG, the Americans with Disabilities Act, Section 508, EN 301 549, or any other
+standard or law. You remain responsible for Your own compliance and for
+verifying any result You rely on.
+
+
+10. LIMITATION OF LIABILITY
+
+IN NO EVENT SHALL ARTCHEMY LABS LLC BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM,
+OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE. THIS INCLUDES LOST PROFITS, LOST DATA, BUSINESS INTERRUPTION, AND ANY
+INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, EVEN IF WE
+HAVE BEEN ADVISED OF THE POSSIBILITY.
+
+
+11. GOVERNING LAW
+
+This licence is governed by the laws of the State of Connecticut, United States,
+without regard to its conflict of law rules.
+
+
+12. ASKING FOR MORE
+
+If You want to do something this licence does not permit, ask. Redistribution
+rights, bundling rights, marketplace listings, white labelling, and site
+licences are all available by agreement.
+
+Licensing enquiries go through https://artchemylabs.com.

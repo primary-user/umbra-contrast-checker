@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtensionManifest
+    Version="7.0"
+    ExtensionBundleId="com.umbracontrastchecker.panel"
+    ExtensionBundleVersion="1.11.0"
+    ExtensionBundleName="Umbra Contrast Checker"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+  <ExtensionList>
+    <Extension Id="com.umbracontrastchecker.panel.main" Version="1.11.0" />
+  </ExtensionList>
+
+  <ExecutionEnvironment>
+    <HostList>
+      <!-- ILST is Illustrator. 24.0 = CC 2020; upper bound left open. -->
+      <Host Name="ILST" Version="[24.0,99.9]" />
+    </HostList>
+
+    <LocaleList>
+      <Locale Code="All" />
+    </LocaleList>
+
+    <RequiredRuntimeList>
+      <RequiredRuntime Name="CSXS" Version="9.0" />
+    </RequiredRuntimeList>
+  </ExecutionEnvironment>
+
+  <DispatchInfoList>
+    <Extension Id="com.umbracontrastchecker.panel.main">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./client/index.html</MainPath>
+          <ScriptPath>./host/index.jsx</ScriptPath>
+          <CEFCommandLine>
+            <!-- Needed so the panel can read captured PNGs off disk. -->
+            <Parameter>--allow-file-access</Parameter>
+            <Parameter>--allow-file-access-from-files</Parameter>
+            <Parameter>--disable-site-isolation-trials</Parameter>
+          </CEFCommandLine>
+        </Resources>
+
+        <Lifecycle>
+          <AutoVisible>true</AutoVisible>
+        </Lifecycle>
+
+        <UI>
+          <Type>Panel</Type>
+          <Menu>Umbra Contrast Checker</Menu>
+          <Geometry>
+            <Size>
+              <Height>660</Height>
+              <Width>240</Width>
+            </Size>
+            <MinSize>
+              <Height>420</Height>
+              <Width>220</Width>
+            </MinSize>
+            <MaxSize>
+              <Height>2400</Height>
+              <Width>460</Width>
+            </MaxSize>
+          </Geometry>
+          <Icons />
+        </UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>

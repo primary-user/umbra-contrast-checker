@@ -1,0 +1,95 @@
+name: Bug report
+description: Something the panel got wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **A wrong number is the bug worth reporting fastest.** If the panel
+        showed a ratio for artwork it should have refused to measure, say so in
+        the title. That class of defect gets fixed ahead of everything else.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What the panel showed, and what it should have shown.
+      placeholder: |
+        Selected the headline on the gradient banner. Panel reported 21.00:1 and
+        a green pass. The text is barely readable at the light end of the ramp.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce it
+      description: >
+        The artwork matters more than the clicks. A gradient behind text and a
+        flat fill behind text are different code paths.
+      placeholder: |
+        1. Rectangle with a white to black gradient
+        2. Black text on top of it
+        3. Select the text with the Selection tool
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Panel version
+      description: Gear icon, then the line under the Artchemy Labs credit.
+      placeholder: "1.11.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: artwork
+    attributes:
+      label: What was selected, and what it sits inside
+      description: >
+        Groups, layers, opacity and blend modes change the colour the panel
+        measures, so they matter as much as the fill. Mention any that apply to
+        the text, the background, or a group the two share.
+      placeholder: |
+        Text at 100% inside a group at 65% opacity, on a layer set to Multiply.
+    validations:
+      required: false
+
+  - type: textarea
+    id: crash
+    attributes:
+      label: If Illustrator crashed
+      description: >
+        On macOS, attach the newest Adobe Illustrator .ips file from
+        ~/Library/Logs/DiagnosticReports. It names the exact place it failed,
+        which is more than any report from inside the panel could.
+      render: text
+    validations:
+      required: false
+
+  - type: input
+    id: illustrator
+    attributes:
+      label: Illustrator version
+      placeholder: "30.7"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+    validations:
+      required: true
+
+  - type: input
+    id: colorspace
+    attributes:
+      label: Document colour mode
+      placeholder: RGB or CMYK
+    validations:
+      required: false

@@ -1,0 +1,10 @@
+# Every text file is stored and checked out with LF line endings, on every
+# platform. The release workflow builds on Windows, where Git would otherwise
+# convert them, which breaks the shell scripts and changes what gets signed.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.zxp binary
+*.p12 binary
