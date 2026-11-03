@@ -900,6 +900,25 @@ async function probe(win) {
     ok(overridden(doc), 'and a press outside the panel still picks',
         doc.getElementById('mode-chip').className);
 
+    section('a tap too quick for the button state still picks');
+    /*
+      A trackpad tap is down and up again between two samples of the button
+      state, so the click reached Illustrator and the loupe never saw it. The
+      macOS helper also reports a running count of presses; a count that moved
+      is a click, whatever the buttons say now. Positions may carry half points.
+    */
+    ({ win, doc, host, errors } = boot('xy'));
+    await wait(150);
+    click(doc, 'btn-camera');
+    await wait(400);
+    host.setPointerLine('100.5 100.5 0 0 1920 1080 70 0 5');   // baseline count
+    await wait(200);
+    ok(isAuto(doc), 'a steady count picks nothing', doc.getElementById('mode-chip').className);
+    host.setPointerLine('100.5 100.5 0 0 1920 1080 71 0 6');   // a press came and went
+    await wait(200);
+    ok(overridden(doc), 'a press counted between samples locks the colour',
+        doc.getElementById('mode-chip').className);
+
     section('grouped artwork explains itself');
     /*
       Black text inside a group at 50% renders as mid-grey. Measuring the grey is
@@ -1596,6 +1615,57 @@ async function probe(win) {
     ok(!/^as /.test(txt(doc, 'ratio-note')),
         'and selecting something else drops back to Auto', txt(doc, 'ratio-note'));
     ok(doc.getElementById('outline-note').hidden, 'ordinary text never sees the question');
+
+    section('text with more than one colour is graded at its weakest');
+    /*
+      The host hands over every run in the frame. The black run comes first and
+      reads 21:1; the grey one beside it reads 4.54. The verdict is the grey,
+      the notice says the frame is mixed, and a fix replaces the grey and
+      nothing else.
+    */
+    ({ win, doc, host, errors } = boot());
+    host.setColorSpace('RGB');
+    host.setScenario('mixedText');
+    await wait(1000);
+    ok(txt(doc, 'ratio') === '4.54', 'the grey run is the verdict, not the black one first in line', txt(doc, 'ratio'));
+    ok(/mixes 2 colours/.test(txt(doc, 'notice')) && /#767676/.test(txt(doc, 'notice')),
+        'the notice says the text is mixed and names the colour graded', txt(doc, 'notice'));
+    ok(txt(doc, 'hex-fg') === '#767676', 'and the text swatch shows that colour', txt(doc, 'hex-fg'));
+
+    // Snap the text to 7:1 from its slider: the write has to name the grey.
+    const mixedMark = doc.querySelector('#fg-marks .mark.aaa');
+    const mixedBefore = host.applied().length;
+    if (mixedMark) {
+        mixedMark.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+        await wait(300);
+    }
+    const mixedWrite = host.applied()[host.applied().length - 1];
+    ok(!!mixedMark && host.applied().length === mixedBefore + 1 && mixedWrite.from === '#767676',
+        'a fix tells the host which colour it replaces', JSON.stringify(mixedWrite));
+    await wait(1000);
+    ok(txt(doc, 'ratio') !== '4.54' && /mixes 2 colours/.test(txt(doc, 'notice')),
+        'and the reading moves on, with the black run still there', txt(doc, 'ratio') + ' / ' + txt(doc, 'notice'));
+
+    ({ win, doc, host, errors } = boot());
+    host.setColorSpace('RGB');
+    host.setScenario('mixedSizes');
+    await wait(1000);
+    ok(txt(doc, 'ratio') === '3.54', 'one colour at two sizes reads 3.54', txt(doc, 'ratio'));
+    ok(/^12px body text/.test(txt(doc, 'ratio-note')) && /needs 4\.5/.test(txt(doc, 'ratio-note')),
+        'and is graded at the 12px line, which needs 4.5, not the 24px headline that passes at 3',
+        txt(doc, 'ratio-note'));
+    ok(/mixes 2 sizes/.test(txt(doc, 'notice')), 'the notice names the sizes', txt(doc, 'notice'));
+    ok(/Part of this text uses a gradient or pattern/.test(txt(doc, 'notice')),
+        'and admits the run it could not grade', txt(doc, 'notice'));
+
+    section('a gradient with unread stops says so, and the notice stays');
+    ({ win, doc, host, errors } = boot());
+    host.setScenario('gradient');
+    host.setStopsMissed(2);
+    await wait(1000);
+    ok(/2 stops in this gradient could not be read/.test(txt(doc, 'notice')),
+        'the warning is still on screen after the render finishes', txt(doc, 'notice'));
+    host.setStopsMissed(0);
 
     section('what counts as large text depends on the medium');
     /*

@@ -263,6 +263,61 @@ function makeHost() {
           body text, and needs 4.5:1. Same artwork, opposite verdicts, and the
           medium is the only thing that decides between them.
         */
+        /*
+          One frame, two colours. The host hands the black run over first, as
+          the frame's representative colour: 21:1, a pass. The grey run beside
+          it reads 4.54 against white, so it is the weakest part, and the one
+          a fix has to replace.
+        */
+        mixedText: {
+            signature: 'n1|TextFrame:500,-600,3000',
+            selection: {
+                ok: true, selectionCount: 1, autoBackground: true,
+                foreground: {
+                    token: 's21', tokens: ['s21'], label: 'Sale ends Friday', kind: 'solid',
+                    rgb: [0, 0, 0], alpha: 1, blend: 'normal',
+                    isText: true, pointSize: 12, bold: false, sizeClass: 'normal',
+                    runs: [
+                        { rgb: [0, 0, 0], pointSize: 12, bold: false, chars: 5 },
+                        { rgb: [118, 118, 118], pointSize: 12, bold: false, chars: 11 }
+                    ],
+                    unreadableRuns: 0
+                },
+                background: {
+                    token: 's22', tokens: ['s22'], label: 'white card', kind: 'solid',
+                    rgb: [255, 255, 255], alpha: 1, blend: 'normal'
+                },
+                backdrops: []
+            }
+        },
+
+        /*
+          One colour at two sizes. #888888 on white is 3.54: enough for the 24px
+          headline, not for the 12px line under it. The host reports the
+          headline first.
+        */
+        mixedSizes: {
+            signature: 'n1|TextFrame:520,-620,3020',
+            selection: {
+                ok: true, selectionCount: 1, autoBackground: true,
+                foreground: {
+                    token: 's23', tokens: ['s23'], label: 'Headline and note', kind: 'solid',
+                    rgb: [136, 136, 136], alpha: 1, blend: 'normal',
+                    isText: true, pointSize: 24, bold: false, sizeClass: 'large',
+                    runs: [
+                        { rgb: [136, 136, 136], pointSize: 24, bold: false, chars: 8 },
+                        { rgb: [136, 136, 136], pointSize: 12, bold: false, chars: 20 }
+                    ],
+                    unreadableRuns: 1
+                },
+                background: {
+                    token: 's24', tokens: ['s24'], label: 'white card', kind: 'solid',
+                    rgb: [255, 255, 255], alpha: 1, blend: 'normal'
+                },
+                backdrops: []
+            }
+        },
+
         heading18: {
             signature: 'n1|TextFrame:120,-300,1800',
             selection: {
@@ -380,8 +435,10 @@ function makeHost() {
     }
 
     // Write a colour onto whichever side of the current scenario owns a token.
-    function applyToFixture(tokens, hex) {
+    function applyToFixture(tokens, hex, fromHex) {
         var rgb = hexToRgb(hex);
+        var from = fromHex ? hexToRgb(fromHex) : null;
+        function same(a, b) { return a && b && a[0] === b[0] && a[1] === b[1] && a[2] === b[2]; }
         var sel = SCENARIOS[scenario].selection;
         if (!sel || !sel.ok) return;
 
@@ -392,7 +449,14 @@ function makeHost() {
                 // Through the alias: the panel holds whatever name the last
                 // wcagSelection issued, the fixture holds its original one.
                 if (stableToken(tokens[i]) !== layer.token) continue;
-                layer.rgb = rgb.slice();
+                // A frame with several runs changes only the runs painted the
+                // colour being replaced, as the host does.
+                if (layer.runs && from) {
+                    layer.runs.forEach(function (run) { if (same(run.rgb, from)) run.rgb = rgb.slice(); });
+                    layer.rgb = layer.runs[0].rgb.slice();
+                } else {
+                    layer.rgb = rgb.slice();
+                }
                 tokenColours[layer.token] = rgb.join(',');
                 return;
             }
@@ -409,7 +473,7 @@ function makeHost() {
         switch (fnName) {
             case 'wcagPing':
                 return {
-                    ok: true, version: '1.11.0', appVersion: '30.7.0',
+                    ok: true, version: '1.12.0', appVersion: '30.7.0',
                     hasDocument: scenario !== 'nodoc',
                     tempFolder: '/tmp',
                     os: 'Macintosh OS 26.5.2/64'
@@ -475,7 +539,7 @@ function makeHost() {
                   an implementation detail; the side is the intent.
                 */
                 applied.push({ token: list[0], tokens: list, hex: args[1],
-                               side: sideOf(list) });
+                               from: args[2], side: sideOf(list) });
                 /*
                   Actually change the document, the way Illustrator does.
 
@@ -484,7 +548,7 @@ function makeHost() {
                   poll read the ORIGINAL back, and a test could not tell a
                   working apply from one that silently did nothing.
                 */
-                applyToFixture(list, String(args[1]));
+                applyToFixture(list, String(args[1]), args[2] ? String(args[2]) : '');
                 return { ok: true, applied: args[1], objects: list.length, subpaths: list.length, skipped: null, errors: 0 };
 
             case 'wcagHoldSelection':
@@ -659,6 +723,12 @@ function makeHost() {
         },
         setGradientStops: function (stops) {
             SCENARIOS.gradient.selection.background.stops = stops;
+            sigCounter++;
+        },
+        // Stops the host could not read: past its cap, or a colour that would
+        // not resolve. The panel has to say its range may understate it.
+        setStopsMissed: function (n) {
+            SCENARIOS.gradient.selection.background.stopsMissed = n;
             sigCounter++;
         },
         // A gradient with unreadable stops — an older host, or a gradient whose

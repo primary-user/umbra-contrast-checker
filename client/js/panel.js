@@ -87,6 +87,8 @@
 
     var state = {
         payload: null,
+        // Which run of a mixed text frame is being graded: { index }, or null.
+        textRun: null,
         signature: '',
         pickFg: null,
         pickBg: null,
@@ -145,6 +147,7 @@
             pointerTick: -1,        // heartbeat from the server
             pointerAt: 0,           // when that heartbeat last advanced
             buttons: 0,             // pressed mouse buttons, for click-to-pick
+            presses: -1,            // the helper's running count of presses, -1 unknown
             /*
               Is the pointer over the panel itself?
 
@@ -484,6 +487,100 @@
         if (message) announce(message);
     }
 
+    /*
+      TEXT WITH MORE THAN ONE COLOUR, SIZE OR WEIGHT
+
+      The host sends every distinct run in the frame. Each is graded against
+      its OWN threshold, because a 24px headline and a 12px caption in the
+      same frame need 3:1 and 4.5:1, and the verdict is the run that comes
+      closest to failing, or fails by most: lowest ratio over required ratio.
+
+      The chosen run is written into the foreground so everything downstream
+      (swatch, sliders, fixes, the colour a fix replaces) works on it without
+      knowing runs exist. Held steady while the text slider is being dragged,
+      when every run would read as the draft colour.
+    */
+    function gradeTextRuns() {
+        var p = state.payload;
+        var f = (p && p.ok) ? p.foreground : null;
+        if (!f || !f.runs || f.runs.length < 2 || state.pickFg) { state.textRun = null; return; }
+        if (state.draftFg && state.textRun) return;
+
+        // The frame's own size and weight, kept for runs that report none.
+        if (!f.hasOwnProperty('framePointSize')) {
+            f.framePointSize = f.pointSize;
+            f.frameBold = !!f.bold;
+        }
+
+        var best = null;
+        for (var i = 0; i < f.runs.length; i++) {
+            var run = f.runs[i];
+            if (!run || !run.rgb) continue;
+            useRun(f, run);
+
+            var bg = backgroundColour();
+            var fg = foregroundColour(bg);
+            var span = C.contrastRange(fg, backgroundColours());
+            var ratio = span ? span.worst : C.contrastRatio(fg, bg);
+            var margin = ratio / C.requiredRatio(state.level, activeSizeClass());
+            if (!best || margin < best.margin) best = { index: i, margin: margin };
+        }
+
+        if (!best) { state.textRun = null; return; }
+        useRun(f, f.runs[best.index]);
+        state.textRun = { index: best.index };
+    }
+
+    function useRun(f, run) {
+        f.rgb = run.rgb.slice();
+        // A run with no size of its own takes the frame's, never the size of
+        // whichever run happened to be graded before it.
+        f.pointSize = run.pointSize > 0 ? run.pointSize : f.framePointSize;
+        f.bold = run.pointSize > 0 ? !!run.bold : f.frameBold;
+    }
+
+    // What the notice says about mixed text, or '' when there is nothing to say.
+    function mixedTextNote() {
+        var p = state.payload;
+        var f = p && p.foreground;
+        if (!f || !f.runs || !state.textRun || state.pickFg) return '';
+
+        // Count what actually differs. Two runs the host told apart can look
+        // identical here (one colour written as RGB, one as a swatch).
+        var seen = { c: {}, z: {}, w: {} };
+        var count = { c: 0, z: 0, w: 0 };
+        for (var i = 0; i < f.runs.length; i++) {
+            var run0 = f.runs[i];
+            var keys = { c: C.toHex(run0.rgb), z: String(run0.pointSize), w: run0.bold ? 'b' : 'r' };
+            for (var k in keys) {
+                if (!seen[k][keys[k]]) { seen[k][keys[k]] = true; count[k]++; }
+            }
+        }
+        var parts = [];
+        if (count.c > 1) parts.push(count.c + ' colours');
+        if (count.z > 1) parts.push(count.z + ' sizes');
+        if (count.w > 1) parts.push('bold and regular');
+        if (!parts.length) return '';
+        var what = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0];
+
+        var run = f.runs[state.textRun.index];
+        var unit = effectiveMedium() === 'screen' ? 'px' : 'pt';
+        return 'This text mixes ' + what + '. Graded the weakest part, ' + C.toHex(run.rgb) +
+               (run.pointSize ? ' at ' + run.pointSize + unit : '') + '.';
+    }
+
+    // The colour a write replaces, so the host recolours only those runs of a
+    // text frame that hold more than one colour.
+    function fromHexOf(layer) {
+        if (!layer || !layer.rgb) return '';
+        // A side measured from a picked pixel was never matched to a run, so
+        // there is no run colour to name. The host then writes the whole frame.
+        var p = state.payload;
+        var side = (p && layer === p.background) ? state.pickBg : state.pickFg;
+        if (side) return '';
+        return C.toHex(layer.rgb);
+    }
+
     function renderAll() {
         var p = state.payload;
         var hasSelection = !!(p && p.ok);
@@ -531,6 +628,8 @@
             );
             return;
         }
+
+        gradeTextRuns();
 
         // Refuse to invent a verdict for artwork we cannot read.
         var blocked = unreadableReason();
@@ -599,13 +698,6 @@
           caps at 24 and skips any stop whose colour will not resolve; if the one
           it skipped was the dark end, the range understates the problem.
         */
-        var missed = (p.background && p.background.stopsMissed) || 0;
-        if (missed > 0) {
-            showNotice(missed + (missed === 1 ? ' stop in this gradient could not be read'
-                                              : ' stops in this gradient could not be read') +
-                       '. The range below may understate it. Sample the dark end to be sure.');
-        }
-
         if (span && span.spread > 0.05) {
             // Say the whole range, so "it passes over there" is visible rather
             // than something the designer has to discover on press day.
@@ -748,10 +840,48 @@
 
         if (!p || !p.ok) { showNotice(null); return; }
 
+        /*
+          Every caveat that applies, not just the first.
+
+          The gradient's unread stops used to be announced from renderAll, which
+          then called this function, which cleared the notice a moment later.
+          The one warning that said "the range may understate it" never stayed
+          on screen. Collected here, they all do.
+        */
+        var notes = [];
+
+        var missed = (p.background && p.background.stopsMissed) || 0;
+        if (missed > 0 && !state.pickBg) {
+            notes.push(missed + (missed === 1 ? ' stop in this gradient could not be read'
+                                              : ' stops in this gradient could not be read') +
+                       '. The range may understate it. Sample the dark end to be sure.');
+        }
+
+        var mixed = mixedTextNote();
+        if (mixed) notes.push(mixed);
+
+        if (p.foreground && p.foreground.runsPartial && !state.pickFg) {
+            notes.push('This text has more styles than the panel reads at once, so some parts were not checked.');
+        }
+
+        var f = p.foreground;
+        if (f && f.unreadableRuns > 0 && !state.pickFg) {
+            notes.push(f.unreadableRuns === 1
+                ? 'Part of this text uses a gradient or pattern and was not graded. Sample it with the eyedropper.'
+                : f.unreadableRuns + ' parts of this text use a gradient or pattern and were not graded. ' +
+                  'Sample them with the eyedropper.');
+        }
+
         // Gradients and patterns are handled earlier by showBlank(); by the time
         // we get here both colours are readable or sampled.
         if (!p.background && !state.pickBg) {
-            showNotice('Nothing found behind this, measured against white paper.');
+            notes.push('Nothing found behind this, measured against white paper.');
+        }
+
+        if (notes.length) {
+            // The colour space caveat still applies, shortened to fit beside them.
+            if (state.colorSpace === 'CMYK') notes.push('CMYK, so ratios are approximate.');
+            showNotice(notes.join(' '));
             return;
         }
 
@@ -1501,7 +1631,7 @@
         var label = writeTargetLabel(target, side);
 
         setStatus('applying', 'busy');
-        BRIDGE.call('wcagApply', [tokens.join(','), C.toHex(solved.rgb)], function (res) {
+        BRIDGE.call('wcagApply', [tokens.join(','), C.toHex(solved.rgb), fromHexOf(target)], function (res) {
             if (!res.ok) {
                 clearDrafts();
                 setFixNote(res.error || 'Could not apply.', true);
@@ -1659,7 +1789,7 @@
         var targets = (layer.tokens && layer.tokens.length) ? layer.tokens : [layer.token];
 
         setStatus('applying', 'busy');
-        BRIDGE.call('wcagApply', [targets.join(','), C.toHex(solved.rgb)], function (res) {
+        BRIDGE.call('wcagApply', [targets.join(','), C.toHex(solved.rgb), fromHexOf(layer)], function (res) {
             if (!res.ok) {
                 setFixNote(res.error || 'Could not apply.', true);
                 setStatus('error', 'err');
@@ -1806,6 +1936,7 @@
         state.preview.pointerTick = -1;
         state.preview.pointerAt = now();
         state.preview.buttons = 0;
+        state.preview.presses = -1;
 
         // Remember what was selected, so a pick click can be put right.
         state.preview.heldSelection = false;
@@ -1965,10 +2096,21 @@
         var isDown = (next.buttons || 0) > 0;
         state.preview.buttons = next.buttons || 0;
 
+        /*
+          The press count catches what the button state cannot: a trackpad tap
+          is down and up again between two samples, so the click reached
+          Illustrator and the panel never saw it. A count that moved means a
+          press happened, however short. The first reading only sets the base.
+        */
+        var lastPresses = state.preview.presses;
+        var presses = (typeof next.presses === 'number') ? next.presses : -1;
+        state.preview.presses = presses;
+        var tapped = presses >= 0 && lastPresses >= 0 && presses > lastPresses;
+
         var before = state.preview.pointer;
         state.preview.pointer = next;
 
-        if (isDown && !wasDown && !state.preview.overPanel) {
+        if ((tapped || (isDown && !wasDown)) && !state.preview.overPanel) {
             pickAtClick();
             return;
         }
@@ -3215,7 +3357,18 @@
     function loadDocInfo() {
         BRIDGE.call('wcagPing', [], function (ping) {
             if (!ping) return;
-            if (ping.tempFolder) state.tempFolder = ping.tempFolder;
+            if (ping.tempFolder && ping.tempFolder !== state.tempFolder) {
+                state.tempFolder = ping.tempFolder;
+                /*
+                  The sweep at boot ran before the host had named its temp
+                  folder, so it wrote its stop file to a guess and a helper
+                  left behind by a reloaded panel kept polling. Sweep again
+                  now that the folder is known, unless a pick is underway.
+                */
+                if (BRIDGE.sweepOrphanServers && !state.preview.live) {
+                    BRIDGE.sweepOrphanServers(previewFolder());
+                }
+            }
             // Authoritative platform, straight from ExtendScript's $.os.
             if (ping.os) BRIDGE.setPlatform(ping.os);
             /*

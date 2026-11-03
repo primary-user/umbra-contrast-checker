@@ -70,7 +70,13 @@ installer, and the fixes for the few things that occasionally go wrong.
 **Measures the selection.** Click a text object and the ratio appears, graded
 against WCAG 2.2 AA and AAA for body text, large text and non-text contrast. The
 background is found for you and composited through opacity and blend modes, so
-the number reflects what actually renders rather than what was authored.
+the number reflects what actually renders rather than what was authored. It
+finds shapes, compound paths, filled text boxes and Draw Inside frames, and
+counts cropped artwork only where its mask lets it show.
+
+**Grades every colour in the text.** When one text frame mixes colours, sizes
+or weights, each part is checked against its own threshold and the verdict is
+the weakest. A fix recolours that part and nothing else.
 
 **Knows screen from print.** WCAG's large text is 18pt, or 14pt bold, in CSS
 points, which on screen is 24px, or 18.66px bold. An Illustrator web document
@@ -158,6 +164,12 @@ Worth knowing before you rely on it.
   straight from the document.
 - **CMYK documents** are converted to sRGB for measurement, which is an
   approximation. The panel says so in the gear menu.
+- **Area type is judged by its box.** Illustrator does not report where the
+  letters sit inside an area type frame, so the panel looks for the shape behind
+  most of the frame. A frame drawn far larger than its text can still meet the
+  wrong shape; select the text and its background together to settle it.
+- **A hole is part of its shape.** Text placed inside the hole of a ring or a
+  cut out letter is measured against the ring's fill.
 - **Outlined text is paths, not text.** The panel cannot tell a headline from
   an icon set, so when a selection is shaped like outlined type it asks, and one
   tap grades it as body or large text, because WCAG grades images of text as

@@ -102,10 +102,10 @@ ok(H.sameColour([0, 0, 0], [2, 2, 2], 2) === true, 'explicit tolerance honoured'
 ok(H.sameColour([0, 0, 0], [3, 3, 3], 2) === false, 'explicit tolerance is a real bound');
 
 section('apply scope: outlined text');
-ok(/function applyFillToItem\(item, colour\)/.test(HOST), 'applyFillToItem exists');
+ok(/function applyFillToItem\(item, colour, fromRgb\)/.test(HOST), 'applyFillToItem exists');
 ok(/subs\[i\]\.fillColor = colour/.test(HOST), 'every subpath of a compound path is coloured');
 ok(/own\[j\]\.fillColor = colour/.test(HOST), 'a whole compound path is handled too');
-ok(/function wcagApply\(tokenList, hex\)/.test(HOST), 'apply takes a list of tokens');
+ok(/function wcagApply\(tokenList, hex, fromHex\)/.test(HOST), 'apply takes a list of tokens, and the colour it replaces');
 ok(/objects: objects/.test(HOST), 'apply reports how many objects changed');
 ok(/subpaths: subpaths/.test(HOST), 'apply reports how many subpaths changed');
 ok(/tokens: fgGroup/.test(HOST), 'selection payload carries a token group');
@@ -383,8 +383,8 @@ section('inherited visibility');
 ok(/function isEffectivelyHidden\(item\)/.test(HOST), 'visibility is resolved up the tree');
 ok(/if \(isEffectivelyHidden\(it\)\) continue;/.test(HOST),
     'backdrop candidates skip artwork nobody can see');
-ok(/it\.clipping === true/.test(HOST) && /skip\) continue;/.test(HOST),
-    'clipping masks are not treated as painted backdrops');
+ok(/paint\.filled === false\) skip = true/.test(HOST) && /candidate\.clipFill = true/.test(HOST),
+    'a clipping mask counts as a backdrop only when it carries a fill of its own');
 
 section('apply writes each object once');
 ok(/if \(seen\[token\]\) continue;/.test(HOST), 'duplicate tokens are ignored');
@@ -497,6 +497,320 @@ ok(/if \(n > SWEEP_LIMIT\) n = SWEEP_LIMIT;/.test(sweepFn),
     'the sweep caps ITERATIONS, so the work is bounded and not just the output');
 ok(/n = items\.length;/.test(sweepFn) && /i < n;/.test(sweepFn),
     'and reads the live collection length once instead of on every pass');
+
+// ---------------------------------------------------------------------------
+/*
+  THE HOST, RUN WHOLE
+
+  Everything above lifts single functions. The backdrop search and the text
+  run reading only make sense end to end, so this runs the entire host file
+  against a small fake of Illustrator's document model: page items with
+  bounds, fills, parents and clip groups, text frames with ranges, a selection.
+  It is not Illustrator, and where the real DOM is undocumented the fake says
+  what it assumes. What it proves is that the logic does what it claims on the
+  shapes it was written for.
+*/
+section('the whole host against a fake document');
+
+function RGBColor() { this.typename = 'RGBColor'; this.red = 0; this.green = 0; this.blue = 0; }
+function CMYKColor() { this.typename = 'CMYKColor'; }
+function rgbColour(r, g, b) { const c = new RGBColor(); c.red = r; c.green = g; c.blue = b; return c; }
+const NONE = { typename: 'NoColor' };
+function list(arr) { const out = arr.slice(); out.typename = 'Collection'; return out; }
+function union(items) {
+    const bs = items.map(i => i.geometricBounds).filter(Boolean);
+    return [Math.min(...bs.map(b => b[0])), Math.max(...bs.map(b => b[1])),
+            Math.max(...bs.map(b => b[2])), Math.min(...bs.map(b => b[3]))];
+}
+let fakeUid = 0;
+function base(typename, extra) {
+    return Object.assign({ typename, uuid: 'u' + (++fakeUid), opacity: 100,
+        blendingMode: 'BlendModes.NORMAL', hidden: false, guides: false, name: '', parent: null }, extra);
+}
+// bounds are [left, top, right, bottom] with top > bottom, as Illustrator has them
+function rect(bounds, fill, extra) {
+    return base('PathItem', Object.assign({ geometricBounds: bounds, filled: !!fill,
+        fillColor: fill || NONE, clipping: false }, extra));
+}
+function photo(bounds) { return base('RasterItem', { geometricBounds: bounds }); }
+function group(children, extra) {
+    const g = base('GroupItem', Object.assign({ clipped: false, pageItems: list(children),
+        geometricBounds: union(children) }, extra));
+    children.forEach(c => { c.parent = g; });
+    return g;
+}
+function compound(subs) {
+    const c = base('CompoundPathItem', { pathItems: list(subs), geometricBounds: union(subs) });
+    subs.forEach(p => { p.parent = c; });
+    return c;
+}
+function attrs(fill, size, style) { return { fillColor: fill, size: size, textFont: { style: style || 'Regular' } }; }
+/*
+  ASSUMED: `textRanges` hands back one range per run of identical attributes.
+  The scripting reference does not say; scripts in the wild rely on it. The host
+  checks a single range for being visibly mixed, and falls back to words.
+*/
+function text(bounds, runs, extra) {
+    const ranges = runs.map(r => ({ contents: r.text, length: r.text.length,
+        characterAttributes: attrs(r.fill, r.size || 12, r.style) }));
+    const chars = [];
+    ranges.forEach(r => { for (let i = 0; i < r.contents.length; i++) chars.push({ characterAttributes: r.characterAttributes }); });
+    const words = [];
+    ranges.forEach(r => r.contents.split(/\s+/).filter(Boolean).forEach(w =>
+        words.push({ contents: w, length: w.length, characterAttributes: r.characterAttributes })));
+    const frame = base('TextFrame', Object.assign({ geometricBounds: bounds, kind: 'TextType.POINTTEXT',
+        contents: runs.map(r => r.text).join(''),
+        matrix: { mValueA: 1, mValueB: 0, mValueC: 0, mValueD: 1 },
+        textRanges: list(ranges), words: list(words),
+        textRange: { characters: list(chars) } }, extra));
+    /*
+      The frame's own attributes read as its first run and write to EVERY run,
+      which is what Illustrator does with a whole-range assignment: the old
+      apply turned a two colour frame into one colour this way.
+    */
+    frame.textRange.characterAttributes = {
+        get fillColor() { return ranges[0].characterAttributes.fillColor; },
+        set fillColor(c) { ranges.forEach(r => { r.characterAttributes.fillColor = c; }); },
+        get size() { return ranges[0].characterAttributes.size; },
+        get textFont() { return ranges[0].characterAttributes.textFont; }
+    };
+    return frame;
+}
+function areaText(bounds, runs, boxFill) {
+    const t = text(bounds, runs, { kind: 'TextType.AREATEXT' });
+    t.textPath = base('TextPath', { filled: !!boxFill, fillColor: boxFill || NONE, clipping: false });
+    return t;
+}
+function makeDoc(topItems, selection) {
+    const doc = { typename: 'Document', name: 'Fake.ai', fullName: '/fake/Fake.ai',
+        documentColorSpace: 'DocumentColorSpace.RGB' };
+    const layer = base('Layer', { visible: true, template: false, parent: doc, pageItems: list(topItems) });
+    topItems.forEach(i => { i.parent = layer; });
+    // doc.pageItems is recursive through groups. ASSUMED: not into compound paths.
+    const all = [];
+    (function walk(items) {
+        items.forEach(i => { all.push(i); if (i.typename === 'GroupItem') walk(Array.from(i.pageItems)); });
+    }(topItems));
+    doc.pageItems = list(all);
+    doc.selection = selection ? list(selection) : list([]);
+    doc.layers = list([layer]);
+    return doc;
+}
+function hostFor(doc) {
+    const app = { documents: list([doc]), activeDocument: doc, convertSampleColor: () => null };
+    const g = { global: {} };
+    const src = HOST + '\nreturn { wcagSelection: wcagSelection, wcagApply: wcagApply, ' +
+        'wcagSelectionSignature: wcagSelectionSignature, refuseReason: refuseReason };';
+    return new Function('app', '$', 'RGBColor', 'CMYKColor', 'ImageColorSpace', 'ColorConvertPurpose', src)(
+        app, g, RGBColor, CMYKColor, { RGB: 'RGB', CMYK: 'CMYK', LAB: 'LAB' }, { defaultpurpose: 'd' });
+}
+function read(doc) { return JSON.parse(hostFor(doc).wcagSelection()); }
+const hexOf = rgb => '#' + rgb.map(n => n.toString(16).padStart(2, '0')).join('').toUpperCase();
+
+const GREY = () => rgbColour(118, 118, 118);
+const BLACK = () => rgbColour(0, 0, 0);
+const WHITE = () => rgbColour(255, 255, 255);
+const TEAL = () => rgbColour(14, 140, 130);
+const RED = () => rgbColour(200, 30, 30);
+const PAGE = () => rect([0, 1000, 1000, 0], rgbColour(250, 250, 250), { name: 'page' });
+
+(function () {
+    // --- mixed text -------------------------------------------------------
+    const t = text([100, 520, 400, 480], [
+        { text: 'Grey caption ', fill: GREY() }, { text: 'black', fill: BLACK() }, { text: '\r', fill: RED() }]);
+    const doc = makeDoc([PAGE(), t], [t]);
+    const p = read(doc);
+    ok(p.ok, 'a mixed colour frame reads', JSON.stringify(p).slice(0, 200));
+    const runs = (p.foreground && p.foreground.runs) || [];
+    ok(runs.length === 2, 'both visible colours come back as runs', JSON.stringify(runs));
+    ok(runs.some(r => hexOf(r.rgb) === '#767676') && runs.some(r => hexOf(r.rgb) === '#000000'),
+        'grey and black, with the stray red paragraph return left out');
+    ok(p.foreground.rgb && hexOf(p.foreground.rgb) === '#767676',
+        'the first run still stands in as the frame colour', JSON.stringify(p.foreground.rgb));
+
+    const plain = text([100, 520, 400, 480], [{ text: 'One colour', fill: BLACK() }]);
+    const p2 = read(makeDoc([PAGE(), plain], [plain]));
+    ok(p2.foreground.runs === null, 'a single colour frame sends no run list');
+
+    const sized = text([100, 520, 400, 480], [{ text: 'Big ', fill: BLACK(), size: 24 }, { text: 'small', fill: BLACK(), size: 9 }]);
+    const p3 = read(makeDoc([PAGE(), sized], [sized]));
+    ok(p3.foreground.runs && p3.foreground.runs.length === 2 &&
+       p3.foreground.runs.map(r => r.pointSize).sort((a, b) => a - b).join() === '9,24',
+        'one colour at two sizes is two runs, so the small one is graded', JSON.stringify(p3.foreground.runs));
+
+    // apply with the colour being replaced: only those runs change
+    const host = hostFor(doc);
+    const sel = JSON.parse(host.wcagSelection());
+    const res = JSON.parse(host.wcagApply(sel.foreground.tokens.join(','), '#333333', '#767676'));
+    ok(res.ok && res.objects === 1, 'the fix lands on the frame', JSON.stringify(res));
+    ok(hexOf([t.textRanges[0].characterAttributes.fillColor.red, t.textRanges[0].characterAttributes.fillColor.green,
+              t.textRanges[0].characterAttributes.fillColor.blue]) === '#333333', 'the grey run takes the new colour');
+    ok(t.textRanges[1].characterAttributes.fillColor.red === 0, 'and the black run is left alone');
+
+    const res2 = JSON.parse(host.wcagApply(sel.foreground.tokens.join(','), '#333333', '#ABCDEF'));
+    ok(!res2.ok, 'a colour no run is painted with changes nothing, and says so', JSON.stringify(res2));
+
+    // signature notices a later run changing colour
+    const before = JSON.parse(hostFor(doc).wcagSelectionSignature()).sig;
+    t.textRanges[1].characterAttributes.fillColor = RED();
+    const after = JSON.parse(hostFor(doc).wcagSelectionSignature()).sig;
+    ok(before !== after, 'recolouring a later word moves the signature');
+}());
+
+(function () {
+    // --- backgrounds --------------------------------------------------------
+    const boxed = areaText([100, 600, 500, 400], [{ text: 'In a box', fill: WHITE() }], TEAL());
+    const p = read(makeDoc([PAGE(), boxed], [boxed]));
+    ok(p.background && hexOf(p.background.rgb) === '#0E8C82' && p.background.label === 'text box',
+        'a filled text box is the background of its own text', JSON.stringify(p.background));
+    ok(p.autoBackground === true, 'and it was found automatically');
+
+    const unboxed = areaText([100, 600, 500, 400], [{ text: 'No box', fill: BLACK() }], null);
+    const pu = read(makeDoc([PAGE(), unboxed], [unboxed]));
+    ok(pu.background && pu.background.label === 'page', 'an unfilled box falls through to what is behind it',
+        JSON.stringify(pu.background));
+
+    // Draw Inside: the clipping path keeps its fill and paints it behind the contents
+    const frameShape = rect([50, 700, 550, 300], TEAL(), { clipping: true, name: 'frame' });
+    const inside = text([100, 520, 400, 480], [{ text: 'Inside', fill: WHITE() }]);
+    const clipGroup = group([frameShape, inside], { clipped: true });
+    const pc = read(makeDoc([PAGE(), clipGroup], [inside]));
+    ok(pc.background && hexOf(pc.background.rgb) === '#0E8C82',
+        'a Draw Inside frame’s own fill is found behind its text', JSON.stringify(pc.background));
+
+    const mask = rect([50, 700, 550, 300], null, { clipping: true, filled: false });
+    const masked = makeDoc([PAGE(), group([mask, inside], { clipped: true })], [inside]);
+    const pm2 = read(masked);
+    ok(pm2.background && pm2.background.label === 'page', 'an ordinary mask with no fill is never a backdrop',
+        JSON.stringify(pm2.background));
+
+    const pic = photo([0, 900, 900, 100]);
+    const withPhoto = rect([50, 700, 550, 300], TEAL(), { clipping: true });
+    const overPhoto = text([100, 520, 400, 480], [{ text: 'On the photo', fill: WHITE() }]);
+    const pp = read(makeDoc([PAGE(), group([withPhoto, pic, overPhoto], { clipped: true })], [overPhoto]));
+    ok(pp.background && pp.background.kind === 'image',
+        'a photo inside the frame is nearer than the frame’s fill, so the panel is asked to sample it',
+        JSON.stringify(pp.background));
+
+    // A text frame drawn bigger than its card
+    const card = rect([120, 560, 380, 440], RED(), { name: 'card' });
+    const loose = areaText([100, 600, 400, 400], [{ text: 'Loose frame', fill: WHITE() }], null);
+    const pl = read(makeDoc([PAGE(), card, loose], [loose]));
+    ok(pl.background && pl.background.label === 'card',
+        'a frame larger than the card under it is measured against the card, not the page', JSON.stringify(pl.background));
+
+    // Compound path background
+    const ring = compound([rect([100, 700, 600, 200], TEAL()), rect([300, 500, 400, 400], TEAL())]);
+    ring.name = 'ring';
+    const onRing = text([120, 680, 280, 640], [{ text: 'On the ring', fill: WHITE() }]);
+    const pr = read(makeDoc([PAGE(), ring, onRing], [onRing]));
+    ok(pr.background && pr.background.label === 'ring' && hexOf(pr.background.rgb) === '#0E8C82',
+        'a compound path’s fill is read from its subpaths', JSON.stringify(pr.background));
+
+    // A big shape cropped by a small mask does not count outside the mask
+    const smallMask = rect([700, 300, 800, 200], null, { clipping: true, filled: false });
+    const bigRed = rect([0, 900, 900, 100], RED(), { name: 'cropped' });
+    const beside = text([100, 520, 400, 480], [{ text: 'Beside', fill: BLACK() }]);
+    const pk = read(makeDoc([PAGE(), group([smallMask, bigRed], { clipped: true }), beside], [beside]));
+    ok(pk.background && pk.background.label === 'page',
+        'a shape cropped by a mask only counts where the mask shows it', JSON.stringify(pk.background));
+
+    // Selecting the text and the card counts even when the frame is bigger
+    const card2 = rect([120, 560, 380, 440], TEAL(), { name: 'chosen card' });
+    const frame2 = areaText([100, 600, 400, 400], [{ text: 'Chosen', fill: WHITE() }], null);
+    const pe = read(makeDoc([PAGE(), card2, frame2], [frame2, card2]));
+    ok(pe.background && pe.background.label === 'chosen card' && pe.autoBackground === false,
+        'a selected card is the background even under a larger text frame', JSON.stringify(pe.background));
+
+    // An icon with a hole, selected: flattening hands over its first subpath,
+    // and the icon itself must not be found behind it.
+    const iconCard = rect([50, 700, 550, 300], WHITE(), { name: 'icon card' });
+    const icon = compound([rect([200, 600, 300, 500], BLACK()), rect([230, 570, 270, 530], BLACK())]);
+    const pi = read(makeDoc([PAGE(), iconCard, icon], [icon]));
+    ok(pi.background && pi.background.label === 'icon card',
+        'a compound shape is never its own background', JSON.stringify(pi.background));
+
+    // A thin rule through a heading, over a white box
+    const box = rect([80, 560, 420, 440], WHITE(), { name: 'knockout box' });
+    const ruleLine = rect([0, 502, 1000, 498], rgbColour(150, 150, 150), { name: 'rule' });
+    const heading = text([100, 520, 400, 480], [{ text: 'Heading', fill: BLACK() }]);
+    const ph = read(makeDoc([PAGE(), box, ruleLine, heading], [heading]));
+    ok(ph.background && ph.background.label === 'knockout box',
+        'a thin rule through the text does not beat the box behind it', JSON.stringify(ph.background));
+
+    // Fixing the second run leaves a shape painted the first run's colour alone
+    const bar = rect([100, 470, 400, 466], RED(), { name: 'red bar' });
+    const sale = text([100, 520, 400, 480], [{ text: 'SALE ', fill: RED() }, { text: 'only today', fill: GREY() }]);
+    const saleDoc = makeDoc([PAGE(), bar, sale], [sale, bar]);
+    const saleHost = hostFor(saleDoc);
+    const saleSel = JSON.parse(saleHost.wcagSelection());
+    JSON.parse(saleHost.wcagApply(saleSel.foreground.tokens.join(','), '#333333', '#767676'));
+    ok(bar.fillColor.red === 200 && sale.textRanges[0].characterAttributes.fillColor.red === 200 &&
+       sale.textRanges[1].characterAttributes.fillColor.red === 0x33,
+        'a fix for the grey words leaves the red word and the red bar as they were');
+    JSON.parse(saleHost.wcagApply(saleSel.foreground.tokens.join(','), '#AA0000', '#C81E1E'));
+    ok(bar.fillColor.red === 0xAA && sale.textRanges[0].characterAttributes.fillColor.red === 0xAA,
+        'and a fix for the red recolours the red word and the bar that shares its colour');
+
+    // A gradient on the first word does not lock the rest of the frame
+    const gradientWord = { typename: 'GradientColor', gradient: { gradientStops: list([]) } };
+    const lead = text([100, 520, 400, 480], [{ text: 'Glow ', fill: gradientWord }, { text: 'plain words', fill: GREY() }]);
+    const leadDoc = makeDoc([PAGE(), lead], [lead]);
+    const leadHost = hostFor(leadDoc);
+    const leadSel = JSON.parse(leadHost.wcagSelection());
+    ok(leadSel.foreground.refuse === null && leadSel.foreground.unreadableRuns === 1,
+        'a gradient first word is reported as unread, not as a reason to refuse the frame',
+        JSON.stringify({ refuse: leadSel.foreground.refuse, unread: leadSel.foreground.unreadableRuns }));
+    const leadRes = JSON.parse(leadHost.wcagApply(leadSel.foreground.tokens.join(','), '#333333', '#767676'));
+    ok(leadRes.ok && lead.textRanges[0].characterAttributes.fillColor.typename === 'GradientColor',
+        'and a fix writes the solid words while the gradient word keeps its gradient', JSON.stringify(leadRes));
+
+    const host = hostFor(makeDoc([frameShape]));
+    ok(host.refuseReason(frameShape) === null, 'a filled clipping path can be recoloured');
+    ok(host.refuseReason(mask) === 'a clipping path', 'an unfilled mask still cannot');
+}());
+
+// ---------------------------------------------------------------------------
+section('the eyedropper helpers agree on where the pointer is');
+/*
+  The helper scripts are strings inside cep.js. Pull them out and check the
+  ones that can be checked here: the Windows scripts all declare DPI
+  awareness, and the macOS grab script copes with the half points the pointer
+  server now reports on a Retina display.
+*/
+(function () {
+    const os = require('os');
+    const cp = require('child_process');
+    const CEP = fs.readFileSync(path.join(__dirname, '..', 'client', 'js', 'cep.js'), 'utf8');
+    const from = CEP.indexOf('var MAC_LOUPE_SCRIPT');
+    const to = CEP.indexOf('var scriptPaths');
+    const scripts = new Function(CEP.slice(from, to) +
+        '; return { WIN_LOUPE_SCRIPT: WIN_LOUPE_SCRIPT, WIN_POINTER_SERVER: WIN_POINTER_SERVER, ' +
+        'WIN_GRAB_SCRIPT: WIN_GRAB_SCRIPT, MAC_GRAB_SCRIPT: MAC_GRAB_SCRIPT, MAC_POINTER_SERVER: MAC_POINTER_SERVER };')();
+
+    ['WIN_LOUPE_SCRIPT', 'WIN_POINTER_SERVER', 'WIN_GRAB_SCRIPT'].forEach(name => {
+        ok(/SetProcessDpiAwarenessContext/.test(scripts[name]) && /SetProcessDPIAware\(\)/.test(scripts[name]),
+            name + ' declares itself DPI aware, so pointer and capture agree under display scaling');
+    });
+    ok(/CGEventSourceCounterForEventType/.test(scripts.MAC_POINTER_SERVER),
+        'the macOS pointer server counts presses, so a quick tap is not lost between samples');
+    ok(/Math\.floor\(p\.x \* 2\) \/ 2/.test(scripts.MAC_POINTER_SERVER),
+        'and reports half points, one Retina pixel, instead of whole points');
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'umbra-grab-'));
+    const script = path.join(dir, 'grab.sh');
+    const ptr = path.join(dir, 'ptr');
+    const out = path.join(dir, 'frame.png');
+    fs.writeFileSync(script, scripts.MAC_GRAB_SCRIPT);
+    fs.writeFileSync(ptr, '512.5 300.5 -1440 0 1440 900 7 0 12\n');
+    // screencapture does not exist here, so the script stops after writing the
+    // region it would have captured. That region is what is being tested.
+    cp.spawnSync('sh', [script, out, '128', ptr]);
+    const pos = fs.existsSync(out + '.pos') ? fs.readFileSync(out + '.pos', 'utf8').trim() : '';
+    ok(pos === '512.5 300.5 448 236 128',
+        'the grab script centres on a half point pointer and keeps its exact position', pos);
+    fs.rmSync(dir, { recursive: true, force: true });
+}());
 
 /*
   The summary goes LAST, after every section.

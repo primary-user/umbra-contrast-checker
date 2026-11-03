@@ -478,12 +478,19 @@ function gradientStops(colour, depth) {
   path is itself several subpaths. Writing to a single subpath recolours one
   letter — the bug seen in the field. Always write to every subpath.
 */
-function applyFillToItem(item, colour) {
+function applyFillToItem(item, colour, fromRgb) {
     var written = 0;
 
-    if (isTextItem(item)) {
-        item.textRange.characterAttributes.fillColor = colour;
-        return 1;
+    if (isTextItem(item)) return applyFillToText(item, colour, fromRgb);
+
+    /*
+      A shape painted some other colour is not part of this fix. A frame with
+      red and grey text, selected with a red bar under it, sends the bar along
+      with the text; fixing the grey must not repaint the bar.
+    */
+    if (fromRgb) {
+        var current = fillOf(item);
+        if (current.kind !== 'solid' || !sameColour(current.rgb, fromRgb, 2)) return 0;
     }
 
     // A subpath inside a compound path: colour all of its siblings too.
@@ -535,7 +542,20 @@ function refuseReason(item) {
     if (kind === 'MeshItem') return 'a gradient mesh';
     if (kind === 'GraphItem') return 'a graph object';
 
-    try { if (item.clipping) return 'a clipping path'; } catch (e2) {}
+    /*
+      A clipping path with no fill is pure geometry, and writing one would
+      give the mask a fill nobody asked for. One that carries a fill is
+      different: Draw Inside keeps the shape's fill, and Illustrator paints
+      it behind everything the mask holds. That fill is the background the
+      designer sees, so it is fair game.
+    */
+    try {
+        if (item.clipping === true) {
+            var paints = false;
+            try { paints = item.filled === true; } catch (eF) {}
+            if (!paints) return 'a clipping path';
+        }
+    } catch (e2) {}
 
     var fill = fillOf(item);
     if (fill.kind === 'gradient') return 'a gradient fill';
@@ -582,11 +602,205 @@ function fillOf(item) {
             return { kind: 'image', rgb: null };
         }
 
+        /*
+          A compound path has no fill of its own to read. Its subpaths carry
+          the one fill they share, so asking the container answered "no fill",
+          and every background built with Pathfinder, every shape with a hole
+          in it, was invisible to the backdrop search.
+        */
+        if (kind === 'CompoundPathItem') {
+            var lead = null;
+            try { if (item.pathItems.length) lead = item.pathItems[0]; } catch (eLead) {}
+            return lead ? fillOf(lead) : { kind: 'none', rgb: null };
+        }
+
         if (item.filled === false) return { kind: 'none', rgb: null };
         return readColour(item.fillColor);
     } catch (e) {
         return { kind: 'none', rgb: null };
     }
+}
+
+// ---------------------------------------------------------------------------
+// Text runs
+// ---------------------------------------------------------------------------
+
+/*
+  ONE TEXT FRAME, SEVERAL COLOURS
+
+  A headline with one word in the brand colour, a price in red, a label whose
+  first line is bold and larger. The frame was read from its first character,
+  so the panel graded whatever colour happened to come first and said nothing
+  about the rest. A grey caption with one dark word up front passed on the
+  strength of that word.
+
+  Illustrator hands a frame's text back as ranges, one per stretch of identical
+  attributes. Read each, keep the distinct colour, size and weight combinations,
+  and let the panel grade every one of them against its own threshold.
+
+  The ranges are capped, and when a frame gives back more than the cap (or one
+  range that is visibly not uniform) the words stand in for them: colour
+  changes in real artwork land on word boundaries.
+*/
+var RUN_SCAN_LIMIT = 400;
+var RUN_KEEP_LIMIT = 24;
+var BOLD_STYLE = /bold|black|heavy|semibold|demibold/i;
+
+// Cheap check for a single range that is not actually uniform: compare the
+// first and last characters.
+function looksMixed(frame) {
+    try {
+        var chars = frame.textRange.characters;
+        var len = chars.length;
+        if (len < 2) return false;
+        var a = chars[0].characterAttributes;
+        var b = chars[len - 1].characterAttributes;
+        if (colourValueStamp(a.fillColor) !== colourValueStamp(b.fillColor)) return true;
+        return a.size !== b.size;
+    } catch (e) {
+        return false;
+    }
+}
+
+/*
+  The ranges to read. `forWrite` drops the cap and the sampling: a recolour
+  that skipped a word would leave it behind in the old colour.
+*/
+function textRunList(frame, forWrite) {
+    var list = [];
+    var ranges = null;
+    var n = 0;
+    try { ranges = frame.textRanges; n = ranges.length; } catch (e) { ranges = null; n = 0; }
+
+    var cap = forWrite ? 20000 : RUN_SCAN_LIMIT;
+    if (ranges && (n > 1 || (n === 1 && !looksMixed(frame))) && n <= cap) {
+        for (var i = 0; i < n; i++) {
+            try { list.push(ranges[i]); } catch (e2) {}
+        }
+        if (list.length) return list;
+    }
+
+    if (forWrite) {
+        var chars = null;
+        var c = 0;
+        try { chars = frame.textRange.characters; c = chars.length; } catch (e3) { c = 0; }
+        for (var k = 0; k < c && k < 20000; k++) {
+            try { list.push(chars[k]); } catch (e4) {}
+        }
+        return list;
+    }
+
+    var words = null;
+    var w = 0;
+    try { words = frame.words; w = words.length; } catch (e5) { w = 0; }
+    if (w > 0) {
+        var step = Math.max(1, Math.ceil(w / RUN_SCAN_LIMIT));
+        for (var j = 0; j < w; j += step) {
+            try { list.push(words[j]); } catch (e6) {}
+        }
+        // Every word read, or only a sample: the panel has to know which.
+        if (step > 1) list.sampled = true;
+        if (list.length) return list;
+    }
+
+    try { list.push(frame.textRange); } catch (e7) {}
+    return list;
+}
+
+// Spaces and returns are drawn in no colour at all. A return carrying a stray
+// colour from an old edit is the most common "second colour" in real files.
+function isBlankRange(range) {
+    try { return !/\S/.test(String(range.contents)); } catch (e) { return false; }
+}
+
+/*
+  Every distinct colour, rendered size and weight in a frame.
+
+  Returns { list: [{ rgb, pointSize, bold, chars }], unreadable: n }, where
+  `unreadable` counts runs painted with a gradient or a pattern, which the panel
+  must admit it did not grade.
+*/
+function textRuns(frame) {
+    var out = { list: [], unreadable: 0, partial: false };
+
+    var scale = scaleFactorOf(frame);
+    if (Math.abs(scale - 1) < 0.005) scale = 1;
+
+    var ranges = textRunList(frame, false);
+    if (ranges.sampled) out.partial = true;
+    var read = {};
+    var index = {};
+
+    for (var i = 0; i < ranges.length; i++) {
+        var range = ranges[i];
+        if (isBlankRange(range)) continue;
+
+        var attrs;
+        try { attrs = range.characterAttributes; } catch (e) { continue; }
+
+        var colour = null;
+        try { colour = attrs.fillColor; } catch (e1) {}
+        // Converting a CMYK colour is a round trip through the colour engine,
+        // so each distinct colour is converted once.
+        var stamp = colourValueStamp(colour);
+        if (!read.hasOwnProperty(stamp)) read[stamp] = readColour(colour);
+        var fill = read[stamp];
+
+        if (fill.kind === 'none') continue;
+        if (fill.kind !== 'solid' || !fill.rgb) { out.unreadable++; continue; }
+
+        var size = 0;
+        try { size = attrs.size; } catch (e2) {}
+        if (!isNum(size) || size < 0) size = 0;
+        size = Math.round(size * scale * 100) / 100;
+
+        var bold = false;
+        try { bold = BOLD_STYLE.test(String(attrs.textFont.style)); } catch (e3) {}
+
+        var chars = 0;
+        try { chars = range.length; } catch (e4) {}
+        if (!isNum(chars)) chars = 0;
+
+        var key = stamp + '|' + size + '|' + (bold ? 1 : 0);
+        if (index.hasOwnProperty(key)) { out.list[index[key]].chars += chars; continue; }
+        if (out.list.length >= RUN_KEEP_LIMIT) { out.partial = true; continue; }
+
+        index[key] = out.list.length;
+        out.list.push({ rgb: fill.rgb, pointSize: size, bold: bold, chars: chars });
+    }
+
+    return out;
+}
+
+/*
+  Recolour the runs painted `fromRgb`, and only those.
+
+  The whole frame used to take the new fill, so fixing the grey caption in a
+  frame that also held a red price turned the price grey. With no `fromRgb`
+  (an older panel) every run is written, which is the old behaviour.
+*/
+function applyFillToText(frame, colour, fromRgb) {
+    if (!fromRgb) {
+        frame.textRange.characterAttributes.fillColor = colour;
+        return 1;
+    }
+
+    var ranges = textRunList(frame, true);
+    var written = 0;
+    // When the ranges fall back to single characters, a CMYK frame would
+    // otherwise pay a colour engine round trip per letter.
+    var read = {};
+    for (var i = 0; i < ranges.length; i++) {
+        var range = ranges[i];
+        var fillColour;
+        try { fillColour = range.characterAttributes.fillColor; } catch (e) { continue; }
+        var stamp = colourValueStamp(fillColour);
+        if (!read.hasOwnProperty(stamp)) read[stamp] = readColour(fillColour);
+        var fill = read[stamp];
+        if (fill.kind !== 'solid' || !sameColour(fill.rgb, fromRgb, 2)) continue;
+        try { range.characterAttributes.fillColor = colour; written++; } catch (e2) {}
+    }
+    return written;
 }
 
 // ---------------------------------------------------------------------------
@@ -1012,38 +1226,65 @@ function candidateShapes(doc) {
         var it;
         try { it = items[i]; } catch (eGet) { continue; }
 
-        try {
-            if (isGroupItem(it)) continue;
-            if (isTextItem(it)) continue;
-        } catch (eKind) { continue; }
+        // One read of the type, shared by every test below.
+        var kind;
+        try { kind = String(it.typename); } catch (eKind) { continue; }
+        if (kind === 'GroupItem') continue;
+
+        /*
+          A text frame is never a backdrop, but an area type frame can carry a
+          fill on its box, and that fill sits right behind the type. Skipping
+          every frame made a filled text box invisible to the search.
+        */
+        if (kind === 'TextFrame') {
+            var box = textBoxCandidate(it);
+            if (box) list.push(box);
+            continue;
+        }
 
         /*
           One property, one guard, and none of them may discard the candidate.
 
-          These four tests used to share a try whose catch did `continue`. A
+          These tests used to share a try whose catch did `continue`. A
           RasterItem and a PlacedItem carry neither `guides` nor `filled`, so on
           any build where a missing property throws rather than answering
           undefined, every photo in the document fell out of the candidate list
-          on the first test. fillOf has a branch that reports an image as an
-          opaque stop, put there so the backdrop search stops at a photo instead
-          of seeing through it, and that branch was unreachable. White text over
-          a photo got measured against the white card behind the photo.
+          on the first test. Isolating each test makes the outcome the same on
+          every build.
 
-          Isolating each test makes the outcome the same on every build.
+          A compound path keeps its fill and clipping flag on its subpaths, so
+          those questions go to the first subpath.
         */
+        var paint = it;
+        if (kind === 'CompoundPathItem') {
+            try { if (it.pathItems.length) paint = it.pathItems[0]; } catch (eLead) {}
+        }
+
         var skip = false;
-        try { if (it.guides) skip = true; } catch (eG) {}
+        try { if (paint.guides) skip = true; } catch (eG) {}
         if (skip) continue;
-        try { if (it.filled === false) skip = true; } catch (eF) {}
+        try { if (paint.filled === false) skip = true; } catch (eF) {}
         if (skip) continue;
 
         /*
-          A clipping mask is geometry, not paint. Illustrator never renders its
-          fill but does report one, so a white mask rectangle over a photo was
-          being picked as the backdrop and measured as a white background.
+          A subpath of a compound path is not a shape of its own. The compound
+          is the candidate, and a subpath standing in for it would turn the hole
+          in a ring into a filled disc.
         */
-        try { if (it.clipping === true) skip = true; } catch (eC) {}
-        if (skip) continue;
+        if (kind === 'PathItem') {
+            try { if (String(it.parent.typename) === 'CompoundPathItem') skip = true; } catch (eP) {}
+            if (skip) continue;
+        }
+
+        /*
+          A clipping path paints only when it carries a fill of its own, and a
+          mask made with Make Clipping Mask has none (the `filled` test above
+          already dropped it). Draw Inside keeps the shape's fill, and
+          Illustrator paints that fill behind everything the mask holds. It is
+          a backdrop, but the lowest one in its group: see shapeBehind.
+        */
+        var clipFill = false;
+        try { if (paint.clipping === true) clipFill = true; } catch (eC) {}
 
         // Walks the container chain, so it stays last. Running it before the
         // single-property filters paid for a walk on every guide in the file.
@@ -1052,10 +1293,42 @@ function candidateShapes(doc) {
         var b = boundsOf(it);
         if (!b) continue;
 
-        list.push({ item: it, bounds: b, area: areaOf(b), rgb: null, kind: null, resolved: false });
+        var candidate = { item: it, owner: it, bounds: b, area: areaOf(b),
+                          rgb: null, kind: null, resolved: false };
+        if (clipFill) {
+            candidate.clipFill = true;
+            try { candidate.group = it.parent; } catch (eGp) {}
+        }
+        list.push(candidate);
     }
 
     return list;
+}
+
+/*
+  The fill on an area type frame's box, as a candidate.
+
+  The box is a TextPath, which has a fill but no bounds of its own; it shares
+  the frame's. Writes go to the path, and opacity comes from the frame, which
+  is the object the Appearance panel shows it on.
+*/
+function textBoxCandidate(frame) {
+    var kind = '';
+    try { kind = String(frame.kind); } catch (e) { return null; }
+    if (!/AREA/i.test(kind)) return null;
+
+    var path = null;
+    try { path = frame.textPath; } catch (e2) { return null; }
+    if (!path) return null;
+
+    try { if (path.filled !== true) return null; } catch (e3) { return null; }
+    try { if (isEffectivelyHidden(frame)) return null; } catch (e4) { return null; }
+
+    var b = boundsOf(frame);
+    if (!b) return null;
+
+    return { item: path, owner: frame, bounds: b, area: areaOf(b),
+             rgb: null, kind: null, resolved: false, boxFill: true };
 }
 
 /*
@@ -1078,75 +1351,265 @@ function resolveCandidate(candidate) {
 
 function excluded(candidate, skipList) {
     for (var i = 0; i < skipList.length; i++) {
-        if (skipList[i] === candidate) return true;
+        if (skipList[i] === candidate.item || skipList[i] === candidate.owner) return true;
+    }
+    return false;
+}
+
+// Illustrator bounds run [left, top, right, bottom] with top > bottom.
+function rectIntersect(a, b) {
+    if (!a || !b) return null;
+    var left = Math.max(a[0], b[0]);
+    var right = Math.min(a[2], b[2]);
+    var top = Math.min(a[1], b[1]);
+    var bottom = Math.max(a[3], b[3]);
+    if (!(right > left) || !(top > bottom)) return null;
+    return [left, top, right, bottom];
+}
+
+// The share of `target` that `rect` covers, 0 to 1.
+function coverageOf(rect, target) {
+    var whole = areaOf(target);
+    if (!whole) return 0;
+    var overlap = rectIntersect(rect, target);
+    return overlap ? areaOf(overlap) / whole : 0;
+}
+
+// The clipping path of a clip group: the member flagged as one, which is
+// usually the first.
+function clipPathOf(group) {
+    var kids;
+    var n = 0;
+    try { kids = group.pageItems; n = kids.length; } catch (e) { return null; }
+
+    for (var i = 0; i < n && i < 60; i++) {
+        var kid;
+        try { kid = kids[i]; } catch (e2) { continue; }
+        try { if (kid.clipping === true) return kid; } catch (e3) {}
+        try {
+            if (String(kid.typename) === 'CompoundPathItem' &&
+                kid.pathItems.length && kid.pathItems[0].clipping === true) return kid;
+        } catch (e4) {}
+    }
+    return null;
+}
+
+/*
+  The part of a candidate that can actually be seen.
+
+  A shape inside a clip group reports its full geometry, but only the part
+  inside the mask is painted. A banner photo cropped to a small circle still
+  claimed the whole banner, and text beside the circle was measured against a
+  photo that is not there. Intersect with every clipping ancestor. Computed
+  only for candidates that are already near the target, and cached.
+*/
+function visibleRectOf(candidate) {
+    if (candidate.hasOwnProperty('visible')) return candidate.visible;
+
+    var rect = candidate.bounds;
+    var node = null;
+    try { node = candidate.owner.parent; } catch (e) { node = null; }
+
+    var hops = 0;
+    while (node && rect && hops < 40) {
+        hops++;
+        var kind;
+        try { kind = String(node.typename); } catch (e2) { break; }
+        if (kind === 'Document' || kind === 'Layer') break;
+
+        if (kind === 'GroupItem') {
+            var clipped = false;
+            try { clipped = node.clipped === true; } catch (e3) {}
+            // A clipping path's own group is the one it defines: no further cut.
+            var ownGroup = candidate.clipFill && hops === 1;
+            if (clipped && !ownGroup) {
+                var maskBounds = maskBoundsOf(node);
+                if (maskBounds) rect = rectIntersect(rect, maskBounds);
+            }
+        }
+        try { node = node.parent; } catch (e4) { break; }
+    }
+
+    candidate.visible = rect;
+    return rect;
+}
+
+/*
+  A clip group's mask bounds, once per read of the selection. Every member of
+  a group asks for the same mask, and a group can hold hundreds of members.
+  Reset by wcagSelection, so nothing read here outlives the call.
+*/
+var MASK_BOUNDS = null;
+
+function maskBoundsOf(group) {
+    var key = nodeUid(group, 'GroupItem');
+    if (MASK_BOUNDS && MASK_BOUNDS.hasOwnProperty(key)) return MASK_BOUNDS[key];
+    var mask = clipPathOf(group);
+    var b = mask ? boundsOf(mask) : null;
+    if (MASK_BOUNDS) MASK_BOUNDS[key] = b;
+    return b;
+}
+
+// True when `candidate` sits somewhere inside `group`.
+function insideGroup(candidate, group) {
+    if (!group) return false;
+    var groupId = nodeUid(group, 'GroupItem');
+    var node = null;
+    try { node = candidate.owner.parent; } catch (e) { return false; }
+
+    var hops = 0;
+    while (node && hops < 40) {
+        hops++;
+        if (node === group) return true;
+        var kind;
+        try { kind = String(node.typename); } catch (e2) { return false; }
+        if (kind === 'Document' || kind === 'Layer') return false;
+        if (kind === 'GroupItem' && nodeUid(node, kind) === groupId) return true;
+        try { node = node.parent; } catch (e3) { return false; }
     }
     return false;
 }
 
 /*
-  The shape behind an item is the SMALLEST filled thing enclosing it — the card
-  or banner, not the page-wide rectangle.
+  The shape behind an item.
 
-  Matches are gathered by geometry, sorted smallest first, then fills are read in
-  that order until one comes back solid. Typically that is one or two colour
-  reads instead of hundreds.
+  It used to have to ENCLOSE the item, which ruled out the most common layout
+  there is: an area type frame drawn a little larger than the card under it.
+  Nothing enclosed that frame except the page, so the card was skipped and the
+  text was measured against the page colour.
+
+  Now a shape qualifies when it sits behind most of the item, half its area or
+  more, or when it holds the item's centre and is at least as large (the old
+  rule, kept so nothing that matched before stops matching). Among those, the
+  smallest is the nearest: a card sits on a page, not the other way round.
+
+  Coverage is measured against the part of each shape that is visible, so a
+  photo cropped by a mask only counts where the mask lets it show.
+
+  `targetBounds` overrides the item's own bounds, for backdrops whose item has
+  none (a text box) or is clipped.
 */
-function shapeBehind(item, shapes, skipList) {
-    var target = boundsOf(item);
+var COVER_MIN = 0.5;
+
+function shapeBehind(item, shapes, skipList, targetBounds) {
+    var target = targetBounds || boundsOf(item);
     if (!target) return null;
 
     var targetArea = areaOf(target);
-    var enclosing = [];
-    var overlapping = [];
+    var behind = [];     // covers most of the target
+    var centred = [];    // only holds its centre: the old rule, as a fallback
     var i, s;
 
     for (i = 0; i < shapes.length; i++) {
         s = shapes[i];
-        if (s.item === item || excluded(s.item, skipList)) continue;
+        if (s.item === item || s.owner === item || excluded(s, skipList)) continue;
 
-        if (encloses(s.bounds, target, 2)) {
-            enclosing.push(s);
-        } else if (holdsCentre(s.bounds, target) && s.area >= targetArea) {
-            overlapping.push(s);
-        }
+        /*
+          The raw bounds first. What can be seen is always inside them, so a
+          shape that fails here would fail on its visible part too, and the
+          parent walk below is only paid for the few that might qualify. On a
+          page-sized target that is the difference between a handful of walks
+          and one per shape in the file.
+        */
+        var rawCover = targetArea > 0 ? coverageOf(s.bounds, target) : 0;
+        var rawCentre = holdsCentre(s.bounds, target) && s.area >= targetArea;
+        if (rawCover < COVER_MIN && !rawCentre) continue;
+
+        var seen = visibleRectOf(s);
+        if (!seen) continue;
+
+        var cover = targetArea > 0 ? coverageOf(seen, target) : (holdsCentre(seen, target) ? 1 : 0);
+        if (cover >= COVER_MIN) behind.push({ c: s, area: areaOf(seen) });
+        else if (holdsCentre(seen, target) && areaOf(seen) >= targetArea) centred.push({ c: s, area: areaOf(seen) });
     }
 
     function bySize(a, b) { return a.area - b.area; }
-    enclosing.sort(bySize);
-    overlapping.sort(bySize);
+    behind.sort(bySize);
+    centred.sort(bySize);
 
-    for (i = 0; i < enclosing.length; i++) {
-        if (resolveCandidate(enclosing[i])) return enclosing[i];
+    /*
+      Shapes behind most of the target win over shapes that merely cross its
+      centre. A thin rule through a heading holds the heading's centre and is
+      smaller than the box behind it; it is not the heading's background.
+    */
+    var near = behind;
+    var pick = null;
+    for (i = 0; i < behind.length; i++) {
+        if (resolveCandidate(behind[i].c)) { pick = behind[i].c; break; }
     }
-    for (i = 0; i < overlapping.length; i++) {
-        if (resolveCandidate(overlapping[i])) return overlapping[i];
+    if (!pick) {
+        near = centred;
+        for (i = 0; i < centred.length; i++) {
+            if (resolveCandidate(centred[i].c)) { pick = centred[i].c; break; }
+        }
     }
 
-    return null;
+    /*
+      A clipping path's fill is painted underneath everything its group holds,
+      even though the path itself is the top member. When a member of the same
+      group also sits behind the item, that member is the nearer backdrop: the
+      photo inside a Draw Inside frame, not the frame's fill below it.
+    */
+    if (pick && pick.clipFill) {
+        for (i = 0; i < near.length; i++) {
+            var other = near[i].c;
+            if (other === pick || other.clipFill) continue;
+            if (insideGroup(other, pick.group) && resolveCandidate(other)) return other;
+        }
+    }
+
+    return pick;
 }
 
-// The stack of shapes behind an item, innermost first. The panel composites
+/*
+  A selected object counts as the background, as a candidate the rest of the
+  file can treat like any found one.
+*/
+function selectedCandidate(item) {
+    /*
+      Selection flattening hands over a compound path as its first subpath,
+      which is right for reading and writing the fill and wrong for geometry:
+      the first subpath of a ring may be its hole. Measure the compound.
+    */
+    var owner = item;
+    try {
+        if (String(item.parent.typename) === 'CompoundPathItem') owner = item.parent;
+    } catch (e) {}
+    var b = boundsOf(owner);
+    return { item: item, owner: owner, bounds: b, area: areaOf(b),
+             rgb: null, kind: null, resolved: false };
+}
+
+// What to call a backdrop in the panel.
+function candidateLabel(candidate) {
+    if (candidate.boxFill) return 'text box';
+    return describe(candidate.item);
+}
+
+// The stack of shapes behind a backdrop, innermost first. The panel composites
 // these to work out what colour is actually being rendered.
-function backdropStack(item, shapes, maxDepth) {
+function backdropStack(start, shapes, maxDepth) {
     var stack = [];
-    var skip = [item];
-    var current = item;
+    var skip = [start.item, start.owner];
+    var current = start;
 
     for (var d = 0; d < maxDepth; d++) {
-        var found = shapeBehind(current, shapes, skip);
+        var found = shapeBehind(current.owner, shapes, skip,
+                                visibleRectOf(current) || current.bounds);
         if (!found) break;
 
         if (!found.rgb) break;   // unreadable backdrop: stop rather than guess
         stack.push({
             rgb: found.rgb,
-            alpha: effectiveAlpha(found.item),
-            blend: effectiveBlend(found.item),
+            alpha: effectiveAlpha(found.owner),
+            blend: effectiveBlend(found.owner),
             token: registerItem(found.item),
-            label: describe(found.item)
+            label: candidateLabel(found)
         });
 
         skip.push(found.item);
-        current = found.item;
+        skip.push(found.owner);
+        current = found;
     }
 
     return stack;
@@ -1363,7 +1826,7 @@ function wcagPing() {
         var doc = activeDoc();
         return toJson({
             ok: true,
-            version: '1.11.0',
+            version: '1.12.0',
             appVersion: (function () { try { return String(app.version); } catch (e) { return '?'; } })(),
             hasDocument: doc !== null,
             // The panel writes its captures here, so it needs a writable path.
@@ -1424,6 +1887,24 @@ function colourStamp(item, depth) {
     var colour;
     try {
         if (isTextItem(item)) {
+            /*
+              Every run, not the frame as a whole. Recolouring the third word
+              of a headline left the first character, and so the stamp, as it
+              was, and the panel kept showing the old reading until the slow
+              heartbeat came round. Six runs is enough to notice an edit and
+              cheap enough to do on every poll.
+            */
+            var ranges = null;
+            var n = 0;
+            try { ranges = item.textRanges; n = ranges.length; } catch (eR) { n = 0; }
+            if (n > 0) {
+                var parts = ['t' + n];
+                for (var r = 0; r < n && r < 6; r++) {
+                    try { parts.push(colourValueStamp(ranges[r].characterAttributes.fillColor, depth)); }
+                    catch (eS) { parts.push('?'); }
+                }
+                return parts.join('/');
+            }
             colour = item.textRange.characterAttributes.fillColor;
         } else {
             if (item.filled === false) return 'nofill';
@@ -1625,6 +2106,9 @@ function wcagSelection() {
         var doc = activeDoc();
         if (!doc) return toJson({ ok: false, error: 'No document open.' });
 
+        // Fresh for this call: cached geometry never outlives the read.
+        MASK_BOUNDS = {};
+
         var shape = { grouped: false, compound: 0 };
         var items = selectedItems(doc, shape);
         if (!items.length) {
@@ -1661,26 +2145,92 @@ function wcagSelection() {
 
         var fgFill = fills[fgIndex];
 
-        // A second, larger selected object is treated as the background.
-        var explicitBg = null;
-        var fgArea = areaOf(boundsOf(fgItem));
-        var bestArea = -1;
-        for (i = 0; i < items.length; i++) {
-            if (items[i] === fgItem) continue;
-            if (fills[i].kind !== 'solid') continue;
-            var a = areaOf(boundsOf(items[i]));
-            if (a > bestArea) { bestArea = a; explicitBg = items[i]; }
+        /*
+          Every colour in the text, not just the first character's. The first
+          readable run stands in as the frame's colour for everything that
+          needs one; the panel grades the full list. See textRuns.
+        */
+        var fgRuns = null;
+        if (isTextItem(fgItem)) {
+            fgRuns = textRuns(fgItem);
+            if (fgRuns.list.length) fgFill = { kind: 'solid', rgb: fgRuns.list[0].rgb };
         }
-        if (explicitBg && bestArea < fgArea) explicitBg = null;
+
+        /*
+          What the foreground IS, for the search. Selection flattening hands
+          over a compound path as its first subpath, and the compound itself is
+          a candidate in the sweep: an icon or an outlined letter with a hole
+          was found sitting behind itself, and read 1.00:1.
+        */
+        var fgOwner = fgItem;
+        try {
+            if (String(fgItem.parent.typename) === 'CompoundPathItem') fgOwner = fgItem.parent;
+        } catch (eOwner) {}
+        var fgSkip = [fgItem, fgOwner];
+
+        /*
+          Text is written run by run, so a gradient on its first word no longer
+          makes the whole frame unwritable; only text with no solid run at all is.
+        */
+        var fgRefuse = (fgRuns && fgRuns.list.length) ? null : refuseReason(fgItem);
+
+        /*
+          A second selected object as the background.
+
+          It used to have to be LARGER than the text, so selecting a text frame
+          and the card under it did nothing whenever the frame had been drawn a
+          little bigger than the card, which is most of the time. Now the
+          selected shapes are weighed exactly the way the automatic search
+          weighs the document: the nearest one sitting behind most of the text.
+          Only when none overlaps it at all does the old rule apply, so picking
+          a text frame and a swatch elsewhere on the page still compares the two.
+
+          Text frames are not backgrounds: their colour is the colour of their
+          letters.
+        */
+        var explicitBg = null;
+        var picked = [];
+        var largest = null;
+        var largestArea = -1;
+        for (i = 0; i < items.length; i++) {
+            var other = items[i];
+            if (other === fgItem || isTextItem(other)) continue;
+            if (fills[i].kind === 'none') continue;
+
+            var choice = selectedCandidate(other);
+            if (!choice.bounds) continue;
+            var masks = false;
+            try { masks = other.clipping === true; } catch (eM) {}
+            if (masks) {
+                choice.clipFill = true;
+                // The owner's parent: a compound mask arrives as its subpath.
+                try { choice.group = choice.owner.parent; } catch (eGp) {}
+            }
+            picked.push(choice);
+
+            if (fills[i].kind === 'solid' && choice.area > largestArea) {
+                largestArea = choice.area;
+                largest = choice;
+            }
+        }
+        if (picked.length) explicitBg = shapeBehind(fgItem, picked, fgSkip);
+        if (!explicitBg && largest && largestArea >= areaOf(boundsOf(fgItem))) explicitBg = largest;
 
         var shapes = candidateShapes(doc);
-        var bgItem = explicitBg;
+        var bgCand = explicitBg;
         var autoDetected = false;
 
-        if (!bgItem) {
-            var found = shapeBehind(fgItem, shapes, [fgItem]);
-            if (found) { bgItem = found.item; autoDetected = true; }
+        if (!bgCand) {
+            /*
+              A filled text box is the nearest backdrop there can be: it is part
+              of the same object as the letters.
+            */
+            var own = isTextItem(fgItem) ? textBoxCandidate(fgItem) : null;
+            if (own && resolveCandidate(own)) bgCand = own;
+            if (!bgCand) bgCand = shapeBehind(fgItem, shapes, fgSkip);
+            if (bgCand) autoDetected = true;
         }
+        var bgItem = bgCand ? bgCand.item : null;
 
         clearRegistry(doc);
 
@@ -1695,17 +2245,40 @@ function wcagSelection() {
         */
         var fgGroup = (function () {
             var group = [];
+            /*
+              The foreground itself always belongs, whatever its first
+              character says: a frame whose leading space carries a stray
+              colour would otherwise be left out of its own fix.
+            */
+            if (!fgRefuse) group.push(fgToken);
+
+            /*
+              Any colour in the text, not only the first: the panel may grade
+              and fix the second run, and a shape painted that colour belongs
+              with it. The write itself skips whatever is not painted the
+              colour being replaced.
+            */
+            var colours = [fgFill.rgb];
+            if (fgRuns) {
+                for (var r = 0; r < fgRuns.list.length; r++) colours.push(fgRuns.list[r].rgb);
+            }
+            function anyColour(rgb) {
+                for (var k = 0; k < colours.length; k++) {
+                    if (sameColour(rgb, colours[k], 2)) return true;
+                }
+                return false;
+            }
+
             for (var t = 0; t < items.length; t++) {
                 var candidate = items[t];
+                if (candidate === fgItem) continue;
 
                 var cf = fills[t];
                 if (cf.kind !== 'solid') continue;
-                if (!sameColour(cf.rgb, fgFill.rgb, 2)) continue;
+                if (!anyColour(cf.rgb)) continue;
                 if (refuseReason(candidate)) continue;
 
-                // Same tests for the foreground as for everything else — only
-                // its handle is reused, so it is not registered a second time.
-                group.push(candidate === fgItem ? fgToken : registerItem(candidate));
+                group.push(registerItem(candidate));
                 if (group.length >= 800) break;
             }
             return group;
@@ -1717,7 +2290,9 @@ function wcagSelection() {
           these two arrays rather than from another walk up the tree.
         */
         var fgChain = appearanceChain(fgItem);
-        var bgChain = bgItem ? appearanceChain(bgItem) : [];
+        // A text box takes its opacity from its frame, so the chain is the
+        // frame's: shared with the letters, applied once.
+        var bgChain = bgCand ? appearanceChain(bgCand.owner) : [];
 
         var payload = {
             ok: true,
@@ -1750,12 +2325,22 @@ function wcagSelection() {
                 */
                 outlineLike: !isTextItem(fgItem) && shape.grouped &&
                              shape.compound > 0 && fgGroup.length >= 3,
-                refuse: refuseReason(fgItem),
+                refuse: fgRefuse,
                 isText: isTextItem(fgItem),
                 pointSize: isTextItem(fgItem) ? pointSize(fgItem) : 0,
                 authoredPointSize: isTextItem(fgItem) ? authoredPointSize(fgItem) : 0,
                 bold: isTextItem(fgItem) ? isBoldFont(fgItem) : false,
-                sizeClass: sizeClassOf(fgItem)
+                sizeClass: sizeClassOf(fgItem),
+                /*
+                  Present only when the text holds more than one colour, size
+                  or weight. The panel grades each against its own threshold
+                  and reports the weakest.
+                */
+                runs: (fgRuns && fgRuns.list.length > 1) ? fgRuns.list : null,
+                // Runs painted with a gradient or pattern, which nothing graded.
+                unreadableRuns: fgRuns ? fgRuns.unreadable : 0,
+                // Too many styles to read them all: the verdict covers a sample.
+                runsPartial: fgRuns ? fgRuns.partial : false
             },
             background: null,
             backdrops: [],
@@ -1764,11 +2349,11 @@ function wcagSelection() {
             shared: sharedAppearance(fgChain, bgChain)
         };
 
-        if (bgItem) {
+        if (bgCand) {
             var bgFill = fillOf(bgItem);
             payload.background = {
                 token: registerItem(bgItem),
-                label: describe(bgItem),
+                label: candidateLabel(bgCand),
                 kind: bgFill.kind,
                 rgb: bgFill.rgb,
                 // Present only for a gradient, and the reason the panel can
@@ -1781,7 +2366,7 @@ function wcagSelection() {
                 blendOverBackground: unsharedBlend(bgChain, fgChain),
                 appearance: bgChain
             };
-            payload.backdrops = backdropStack(bgItem, shapes, 4);
+            payload.backdrops = backdropStack(bgCand, shapes, 4);
         }
 
         return toJson(payload);
@@ -1789,13 +2374,19 @@ function wcagSelection() {
 
 }
 
-function wcagApply(tokenList, hex) {
+/*
+  `fromHex`, when given, is the colour being replaced. Text frames recolour only
+  the runs painted that colour, so a frame holding two colours keeps the one
+  the fix was not about. Shapes ignore it.
+*/
+function wcagApply(tokenList, hex, fromHex) {
   return guarded('wcagApply', function () {
     var doc = activeDoc();
     if (!doc) return toJson({ ok: false, error: 'No document open.' });
 
     var rgb = hexToRgb(hex);
     if (!rgb) return toJson({ ok: false, error: 'Bad colour value.' });
+    var fromRgb = fromHex ? hexToRgb(fromHex) : null;
 
     var tokens = String(tokenList).split(',');
     var colour = buildColour(doc, rgb);
@@ -1818,12 +2409,18 @@ function wcagApply(tokenList, hex) {
         var item = lookupItem(token, doc);
         if (!item) continue;
 
-        var why = refuseReason(item);
+        // A text frame written run by run never touches its gradient runs, so
+        // a gradient on one word is no reason to refuse the rest.
+        var why = (fromRgb && isTextItem(item)) ? null : refuseReason(item);
         if (why) { if (!refused) refused = why; continue; }
 
         try {
-            subpaths += applyFillToItem(item, colour);
-            objects++;
+            var wrote = applyFillToItem(item, colour, fromRgb);
+            // A text frame with no run in the old colour has nothing to change.
+            if (wrote > 0) {
+                subpaths += wrote;
+                objects++;
+            }
         } catch (e) {
             errors++;
         }

@@ -408,7 +408,7 @@
         ' if (f.origin.x + f.size.width > maxX) maxX = f.origin.x + f.size.width;' +
         ' if (f.origin.y + f.size.height > maxY) maxY = f.origin.y + f.size.height;' +
         ' }' +
-        ' [Math.round(p.x), Math.round(primaryH - p.y), Math.round(minX),' +
+        ' [Math.floor(p.x), Math.floor(primaryH - p.y), Math.round(minX),' +
         ' Math.round(primaryH - maxY), Math.round(maxX),' +
         ' Math.round(primaryH - minY)].join(" ");\' 2>/dev/null`\n' +
         '[ -z "$POS" ] && exit 3\n' +
@@ -416,10 +416,12 @@
         'set -- $POS\n' +
         'X="$1"; Y="$2"; L="$3"; T="$4"; R="$5"; B="$6"\n' +
         '[ -z "$B" ] && exit 3\n' +
+        '# The pointer may carry half points; expr only does whole numbers.\n' +
+        'XI="${X%.*}"; YI="${Y%.*}"\n' +
         '\n' +
         'HALF=`expr "$SIZE" / 2`\n' +
-        'RX=`expr "$X" - "$HALF"`\n' +
-        'RY=`expr "$Y" - "$HALF"`\n' +
+        'RX=`expr "$XI" - "$HALF"`\n' +
+        'RY=`expr "$YI" - "$HALF"`\n' +
         'MAXX=`expr "$R" - "$SIZE"`\n' +
         'MAXY=`expr "$B" - "$SIZE"`\n' +
         '[ "$RX" -gt "$MAXX" ] && RX="$MAXX"\n' +
@@ -438,9 +440,54 @@
         '  exit 4\n' +
         'fi\n';
 
+    /*
+      WINDOWS DISPLAY SCALING
+
+      PowerShell is not DPI aware. At 125% or 150% Windows hands it a scaled
+      cursor position and scaled screen bounds, while CopyFromScreen copies
+      real pixels, so the loupe captured somewhere other than under the
+      pointer and the right and bottom of the desktop could not be reached.
+      Declaring the process DPI aware, per monitor where the system supports
+      it, puts every coordinate in real pixels. Every script that reads the
+      pointer or copies the screen needs it, or they disagree with each other.
+      If the declaration fails, the script carries on as it always did.
+    */
+    var WIN_DPI_MEMBERS =
+        '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware(); ' +
+        '[DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(System.IntPtr value);';
+
+    /*
+      Compiling the declaration starts the C# compiler, which is most of a
+      second, and the grab script runs once per loupe frame. So the first run
+      compiles it into a DLL in the temp folder and every later run loads that.
+      Anything going wrong there falls back to compiling in memory, and if that
+      fails too the script carries on unaware, as it always did.
+
+      SetProcessDpiAwarenessContext answers false rather than throwing when it
+      is refused, so the older call is tried on false as well.
+    */
+    var WIN_DPI_AWARE =
+        '$umbraDpiDll = Join-Path ([System.IO.Path]::GetTempPath()) "umbra-dpi-1.dll"\n' +
+        'try {\n' +
+        '  if (-not (Test-Path $umbraDpiDll)) {\n' +
+        '    Add-Type -Namespace Umbra -Name Dpi -ErrorAction Stop -OutputAssembly $umbraDpiDll -MemberDefinition \'' +
+        WIN_DPI_MEMBERS + '\'\n' +
+        '  }\n' +
+        '  Add-Type -Path $umbraDpiDll -ErrorAction Stop\n' +
+        '} catch {\n' +
+        '  try { Add-Type -Namespace Umbra -Name Dpi -ErrorAction Stop -MemberDefinition \'' +
+        WIN_DPI_MEMBERS + '\' } catch {}\n' +
+        '}\n' +
+        'try {\n' +
+        '  if (-not [Umbra.Dpi]::SetProcessDpiAwarenessContext([System.IntPtr](-4))) { [void][Umbra.Dpi]::SetProcessDPIAware() }\n' +
+        '} catch {\n' +
+        '  try { [void][Umbra.Dpi]::SetProcessDPIAware() } catch {}\n' +
+        '}\n';
+
     var WIN_LOUPE_SCRIPT =
         '# Umbra Contrast Checker - one loupe frame. Written by the panel.\n' +
         'param([string]$Out, [int]$Size = 48)\n' +
+        WIN_DPI_AWARE +
         'Add-Type -AssemblyName System.Windows.Forms,System.Drawing\n' +
         '$p = [System.Windows.Forms.Cursor]::Position\n' +
         '$half = [int]($Size / 2)\n' +
@@ -487,6 +534,8 @@
         '    var stop = argv[1];\n' +
         '    try {\n' +
         '        ObjC.import("AppKit");\n' +
+        '        var counter = false;\n' +
+        '        try { ObjC.import("CoreGraphics"); counter = true; } catch (eCG) { counter = false; }\n' +
         '        var fm = $.NSFileManager.defaultManager;\n' +
         '        var deadline = Date.now() + 300000;\n' +
         '        var tick = 0;\n' +
@@ -511,12 +560,14 @@
         '            // floor, not round: a pointer at the very bottom of the\n' +
         '            // screen rounds to one point PAST the desktop, which is a\n' +
         '            // coordinate no capture can ever contain.\n' +
-        '            var px = Math.floor(p.x);\n' +
-        '            var py = Math.floor(primaryH - p.y);\n' +
+        '            // Half points: on a Retina display that is one pixel, and whole\n' +
+        '            // points left every odd row and column out of reach.\n' +
+        '            var px = Math.floor(p.x * 2) / 2;\n' +
+        '            var py = Math.floor((primaryH - p.y) * 2) / 2;\n' +
         '            if (px < left) px = left;\n' +
         '            if (py < top) py = top;\n' +
-        '            if (px > right - 1) px = right - 1;\n' +
-        '            if (py > bottom - 1) py = bottom - 1;\n' +
+        '            if (px > right - 0.5) px = right - 0.5;\n' +
+        '            if (py > bottom - 0.5) py = bottom - 0.5;\n' +
         '            // The tick is a heartbeat: it lets the panel tell a server\n' +
         '            // that is standing still from one that has died.\n' +
         '            tick = (tick + 1) % 1000000;\n' +
@@ -524,7 +575,14 @@
         '            // panel cannot see clicks outside its own window any other way.\n' +
         '            var buttons = 0;\n' +
         '            try { buttons = $.NSEvent.pressedMouseButtons; } catch (eB) { buttons = 0; }\n' +
-        '            var line = [px, py, left, top, right, bottom, tick, buttons].join(" ");\n' +
+        '            // A running count of left-button presses. A trackpad tap is\n' +
+        '            // over between two samples, so the button state alone missed it.\n' +
+        '            var presses = -1;\n' +
+        '            if (counter) {\n' +
+        '                try { presses = Number($.CGEventSourceCounterForEventType(0, 1)); } catch (eP) { presses = -1; }\n' +
+        '                if (!(presses >= 0)) presses = -1;\n' +
+        '            }\n' +
+        '            var line = [px, py, left, top, right, bottom, tick, buttons, presses].join(" ");\n' +
         '            $(line).writeToFileAtomicallyEncodingError(out, true, 4, $());\n' +
         '            $.NSThread.sleepForTimeInterval(0.03);\n' +
         '        }\n' +
@@ -537,6 +595,7 @@
     var WIN_POINTER_SERVER =
         '# Umbra Contrast Checker - pointer server. Written by the panel.\n' +
         'param([string]$Out, [string]$Stop)\n' +
+        WIN_DPI_AWARE +
         'try {\n' +
         '  Add-Type -AssemblyName System.Windows.Forms\n' +
         '  $deadline = (Get-Date).AddMinutes(5)\n' +
@@ -579,10 +638,12 @@
         'set -- $POS\n' +
         'X="$1"; Y="$2"; L="$3"; T="$4"; R="$5"; B="$6"\n' +
         '[ -z "$B" ] && exit 3\n' +
+        '# The pointer may carry half points; expr only does whole numbers.\n' +
+        'XI="${X%.*}"; YI="${Y%.*}"\n' +
         '\n' +
         'HALF=`expr "$SIZE" / 2`\n' +
-        'RX=`expr "$X" - "$HALF"`\n' +
-        'RY=`expr "$Y" - "$HALF"`\n' +
+        'RX=`expr "$XI" - "$HALF"`\n' +
+        'RY=`expr "$YI" - "$HALF"`\n' +
         'MAXX=`expr "$R" - "$SIZE"`\n' +
         'MAXY=`expr "$B" - "$SIZE"`\n' +
         '[ "$RX" -gt "$MAXX" ] && RX="$MAXX"\n' +
@@ -607,10 +668,11 @@
     var WIN_GRAB_SCRIPT =
         '# Umbra Contrast Checker - one loupe frame, pointer already known.\n' +
         'param([string]$Out, [int]$Size = 128, [string]$Ptr)\n' +
+        WIN_DPI_AWARE +
         'Add-Type -AssemblyName System.Drawing\n' +
         '$pos = (Get-Content $Ptr -ErrorAction SilentlyContinue) -split "\\s+"\n' +
         'if ($pos.Count -lt 6) { exit 3 }\n' +
-        '$x = [int]$pos[0]; $y = [int]$pos[1]\n' +
+        '$x = [int][math]::Floor([double]$pos[0]); $y = [int][math]::Floor([double]$pos[1])\n' +
         '$l = [int]$pos[2]; $t = [int]$pos[3]; $r = [int]$pos[4]; $b = [int]$pos[5]\n' +
         '$half = [int]($Size / 2)\n' +
         '$rx = $x - $half\n' +
@@ -810,7 +872,8 @@
         var nums = [];
         for (var i = 0; i < bits.length; i++) {
             if (bits[i] === '') continue;
-            var n = parseInt(bits[i], 10);
+            // Positions can carry half points (Retina); the rest are whole.
+            var n = parseFloat(bits[i]);
             if (isNaN(n)) return null;
             nums.push(n);
         }
@@ -827,14 +890,16 @@
         */
         if (x < left) x = left;
         if (y < top) y = top;
-        if (x > right - 1) x = right - 1;
-        if (y > bottom - 1) y = bottom - 1;
+        if (x > right - 0.5) x = right - 0.5;
+        if (y > bottom - 0.5) y = bottom - 0.5;
 
         return {
             x: x, y: y,
             left: left, top: top, right: right, bottom: bottom,
             tick: nums.length > 6 ? nums[6] : -1,
-            buttons: nums.length > 7 ? nums[7] : 0
+            buttons: nums.length > 7 ? nums[7] : 0,
+            // -1 when the helper cannot count presses (Windows, or an older one).
+            presses: nums.length > 8 ? nums[8] : -1
         };
     }
 
@@ -960,7 +1025,7 @@
             var nums = [];
             for (var i = 0; i < bits.length; i++) {
                 if (bits[i] === '') continue;
-                var n = parseInt(bits[i], 10);
+                var n = parseFloat(bits[i]);
                 if (isNaN(n)) { nums = []; break; }
                 nums.push(n);
             }
