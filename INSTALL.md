@@ -99,7 +99,7 @@ along their whole length.
 
 ### Using the eyedropper
 
-The preview pane is a **loupe**: it shows the pixels immediately around your pointer, magnified,
+The eyedropper opens a **loupe** above the tools: it shows the pixels immediately around your pointer, magnified,
 with a crosshair on the one you would pick, and the hex plus the live contrast ratio underneath.
 It works like a system colour picker. Hover around a photo or a gradient and you can see where
 the text would start passing, before committing to anything.
@@ -120,8 +120,8 @@ the text would start passing, before committing to anything.
    pixel you wanted** inside the frozen loupe.
 5. **Esc** cancels, or clears the sample.
 
-Clicks on the panel's own controls are not picks. The gear, the chip and the Text/Bg buttons
-do what they always do, even while the loupe is armed.
+Clicks on the panel's own controls are not picks. The gear, the level switch, Auto and the
+Text/Bg buttons do what they always do, even while the loupe is armed.
 
 If nothing seems to happen when you press Enter, click once on the panel first. It needs
 keyboard focus, and clicking inside Illustrator's canvas takes that away.
@@ -162,8 +162,9 @@ Auto to change this one.
 
 ### The target level
 
-**AA** in the header is a switch: click it for AAA. It is in the header rather than in the gear
-because it is what every number in the panel means. The verdict, the swatch colours and
+The header is the target level: **AA** and **AAA** side by side, the one in use filled blue.
+Click the other to switch. It is in the header rather than in the gear because it is what
+every number in the panel means, and the results table tints that level's column to match. The verdict, the swatch colours and
 the suggested fixes are all graded against it. The same control is in the
 gear popover under **Target level**; they are two views of one setting.
 
@@ -179,7 +180,12 @@ and is never saved.
 Target level, **Medium**, **Treat text as** and **Measure rendered colour** are remembered
 between sessions.
 
-The header shows **live** when the panel is connected and watching your selection.
+The header stays quiet while everything works. It shows **Applying…** while a fix is being
+written to your artwork, **Not applied** if a write fails, and **Not connected** if the panel
+loses touch with Illustrator.
+
+The footnote at the bottom names the standard and the success criteria your target level
+applies. Click it for the thresholds and a link to the specification.
 
 ---
 

@@ -193,11 +193,22 @@
         if (node) node.hidden = !visible;
     }
 
+    /*
+      The header says something only when something needs saying.
+
+      It used to read "live" in green the whole time the panel was connected,
+      which told the user nothing the verdict updating did not already tell
+      them, in the colour the panel uses for a pass. Now an empty status is
+      hidden, and the only words that appear are a write in progress, a write
+      that failed, or a lost connection.
+    */
     function setStatus(text, cls) {
         var node = el('status-dot');
         if (!node) return;
-        node.textContent = text;
+        node.textContent = text || '';
+        node.title = text || '';     // in full, if a narrow dock truncates it
         node.className = 'status' + (cls ? ' ' + cls : '');
+        node.hidden = !text;
     }
 
     /*
@@ -1630,12 +1641,12 @@
         */
         var label = writeTargetLabel(target, side);
 
-        setStatus('applying', 'busy');
+        setStatus('Applying…', 'busy');
         BRIDGE.call('wcagApply', [tokens.join(','), C.toHex(solved.rgb), fromHexOf(target)], function (res) {
             if (!res.ok) {
                 clearDrafts();
                 setFixNote(res.error || 'Could not apply.', true);
-                setStatus('error', 'err');
+                setStatus('Not applied', 'err');
                 renderAll();
                 return;
             }
@@ -1662,7 +1673,7 @@
             setFixNote('Set ' + label + ' to ' + hex +
                        '. Cmd/Ctrl+Z undoes it.', true);
             state.reload = true;
-            setStatus('live', 'live');
+            setStatus('', '');
             paintPickButtons();
             renderAll();
         });
@@ -1788,11 +1799,11 @@
         */
         var targets = (layer.tokens && layer.tokens.length) ? layer.tokens : [layer.token];
 
-        setStatus('applying', 'busy');
+        setStatus('Applying…', 'busy');
         BRIDGE.call('wcagApply', [targets.join(','), C.toHex(solved.rgb), fromHexOf(layer)], function (res) {
             if (!res.ok) {
                 setFixNote(res.error || 'Could not apply.', true);
-                setStatus('error', 'err');
+                setStatus('Not applied', 'err');
                 return;
             }
 
@@ -1810,7 +1821,7 @@
 
             setFixNote(what + '. Cmd/Ctrl+Z undoes it.', true);
             state.reload = true;    // the fill changed; re-read it on the next poll
-            setStatus('live', 'live');
+            setStatus('', '');
         });
     }
 
@@ -1900,9 +1911,17 @@
         state.noteSource = '';
     }
 
-    function setPreviewEmpty(message) {
+    /*
+      keep marks a message worth showing even with the pane collapsed: the
+      eyedropper failing or timing out. Anything else, the idle prompt included,
+      collapses the pane all the way, because the eyedropper button already says
+      what the prompt said.
+    */
+    function setPreviewEmpty(message, keep) {
         var node = el('snapshot-empty');
         if (!node) return;
+        var frame = el('snapshot-frame');
+        if (frame) frame.classList[message && keep ? 'add' : 'remove']('has-note');
         if (!message) { show(node, false); return; }
         node.textContent = message;
         show(node, true);
@@ -2202,7 +2221,7 @@
             state.preview.mode = 'idle';
             state.picking = null;
             paintPickButtons();
-            setPreviewEmpty('Eyedropper unavailable');
+            setPreviewEmpty('Eyedropper unavailable', true);
             noteCaptureFailure(friendlyCaptureError(detail), 'screen');
             // The helper may simply have been cleaned out of the temp folder;
             // rewriting it on the next attempt costs nothing and self-heals.
@@ -2230,7 +2249,7 @@
             state.preview.mode = 'idle';
             state.picking = null;
             paintPickButtons();
-            setPreviewEmpty('Eyedropper timed out. Click it again');
+            setPreviewEmpty('Eyedropper timed out. Click it again', true);
             return;
         }
 
@@ -3163,7 +3182,7 @@
                 */
                 quietPolls = POLL_REST_AFTER;
                 schedulePoll();
-                setStatus('no host', 'err');
+                setStatus('Not connected', 'err');
                 return;
             }
 
@@ -3272,14 +3291,14 @@
                 state.payload = null;
                 clearSampleState(realChange);
                 renderAll();
-                setStatus(res.empty ? 'live' : 'idle', res.empty ? 'live' : '');
+                setStatus('', '');
                 return;
             }
 
             state.payload = res;
             clearSampleState(realChange);
             renderAll();
-            setStatus('live', 'live');
+            setStatus('', '');
         });
     }
 
@@ -3438,21 +3457,45 @@
       where people first find it. Route both through here so they cannot disagree.
     */
     function setLevel(value) {
+        if (value !== 'AA' && value !== 'AAA') return;
         state.level = value;
         savePrefs();
         paintSegment('seg-level', value);
-        paintLevelChip();
+        paintLevelSwitch();
         renderAll();
     }
 
-    function paintLevelChip() {
-        var chip = el('level-chip');
-        if (!chip) return;
-        chip.textContent = state.level;
-        chip.className = 'chip level-chip' + (state.level === 'AAA' ? ' on' : '');
-        chip.setAttribute('aria-pressed', state.level === 'AAA' ? 'true' : 'false');
-        chip.setAttribute('title', 'Target level ' + state.level + ', click for ' +
-            (state.level === 'AAA' ? 'AA' : 'AAA'));
+    /*
+      Everything on screen that names the target level, painted together: the
+      header switch, the tinted column in the results table, and the footnote.
+
+      The footnote names the criteria the level actually applies. At AA that is
+      1.4.3 and 1.4.11; AAA adds 1.4.6 on top of them, because conforming at AAA
+      means meeting the AA criteria as well.
+    */
+    function paintLevelSwitch() {
+        var aaa = state.level === 'AAA';
+        var parts = [['level-aa', 'col-aa', 'th-aa', !aaa],
+                     ['level-aaa', 'col-aaa', 'th-aaa', aaa]];
+
+        for (var i = 0; i < parts.length; i++) {
+            var on = parts[i][3];
+            var button = el(parts[i][0]);
+            if (button) {
+                button.className = 'level-opt' + (on ? ' on' : '');
+                button.setAttribute('aria-pressed', on ? 'true' : 'false');
+            }
+            var col = el(parts[i][1]);
+            if (col) col.className = on ? 'sel' : '';
+            var head = el(parts[i][2]);
+            if (head) head.className = on ? 'sel' : '';
+        }
+
+        // Kept to one line at the panel's 220px minimum: with three criteria the
+        // old "SC 1.4.3 · 1.4.6 · 1.4.11" form wrapped. The numbers alone are
+        // unambiguous next to "WCAG 2.2", and opening the line names each one.
+        setText('conformance-line', 'WCAG 2.2 ' + state.level + ' · ' +
+            (aaa ? '1.4.3, 1.4.6, 1.4.11' : '1.4.3, 1.4.11'));
     }
 
     function wire() {
@@ -3718,11 +3761,24 @@
             renderAll();
         });
 
-        // The header chip and the popover's segmented control are two views of
-        // one setting; either must move the other.
-        el('level-chip').addEventListener('click', function () {
-            setLevel(state.level === 'AA' ? 'AAA' : 'AA');
-        });
+        // The header switch and the popover's segmented control are two views
+        // of one setting; either must move the other.
+        el('level-aa').addEventListener('click', function () { setLevel('AA'); });
+        el('level-aaa').addEventListener('click', function () { setLevel('AAA'); });
+
+        /*
+          The footnote opens downward from the foot of the panel. In a docked
+          panel taller than its content that is off screen, so bring the
+          thresholds into view rather than leave the click looking like it did
+          nothing.
+        */
+        var footnote = el('footnote');
+        if (footnote) {
+            footnote.addEventListener('toggle', function () {
+                if (!footnote.open || !footnote.scrollIntoView) return;
+                try { footnote.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+            });
+        }
 
         el('opt-rendered').addEventListener('change', function () {
             state.useRendered = el('opt-rendered').checked;
@@ -3738,14 +3794,16 @@
           back. Outside CEP — the test harness — there is nothing to open, and
           showing the URL beats failing silently.
         */
-        function bindExternal(id, url) {
+        // When no browser can be opened, the URL is shown beside the button that
+        // asked for it, so it can be copied by hand.
+        function bindExternal(id, url, noteId) {
             el(id).addEventListener('click', function () {
                 var opened = BRIDGE.openExternal && BRIDGE.openExternal(url);
-                if (!opened) setText('doc-note', url);
+                if (!opened) setText(noteId || 'doc-note', url);
             });
         }
 
-        bindExternal('btn-wcag-link', 'https://www.w3.org/TR/WCAG22/#contrast-minimum');
+        bindExternal('btn-wcag-link', 'https://www.w3.org/TR/WCAG22/#contrast-minimum', 'spec-note');
         bindExternal('btn-site', 'https://artchemylabs.com');
         bindExternal('btn-kofi', 'https://ko-fi.com/artchemylabs');
 
@@ -3851,7 +3909,7 @@
         if (window.__UMBRA_TEST__) window.__umbraProbe = testProbe;
 
         if (!BRIDGE.available()) {
-            setStatus('no host', 'err');
+            setStatus('Not connected', 'err');
             setText('ratio-note', 'This panel must run inside Illustrator.');
             return;
         }
@@ -3867,7 +3925,7 @@
         paintSegment('seg-level', state.level);
         paintSegment('seg-size', state.sizeMode);
         paintSegment('seg-medium', state.medium);
-        paintLevelChip();
+        paintLevelSwitch();
         el('opt-rendered').checked = state.useRendered;
 
         /*
@@ -3881,7 +3939,7 @@
         paintPickButtons();
         setPreviewEmpty(idleMessage());
         clearCanvas();
-        setStatus('live', 'live');
+        setStatus('', '');
 
         // Before the first poll, so a host that is already quitting or already
         // hidden is heard before the panel starts talking to it.

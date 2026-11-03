@@ -45,7 +45,6 @@
   --warn: #e68619;
   --warn-bg: #3d3122;
   --warn-text: #f5c98a;       /* 8.19 on --warn-bg */
-  --gear: #ef6d74;            /* an icon, so 3:1 applies: 3.73 on --bar */
   /* Label text on a raised control. --text-dim measured 3.78 here, which the
      sweep never saw because the segmented controls live inside a popover the
      old check skipped entirely. Smallest move that clears 4.5 (dE 4.8). */
@@ -90,6 +89,13 @@ html, body {
   -webkit-user-select: none;
   user-select: none;
 }
+/* A column at least as tall as the panel, so the footnote can sit at its foot
+   however short the reading above it is. */
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
 
 button { font-family: inherit; cursor: pointer; }
 
@@ -97,16 +103,54 @@ button { font-family: inherit; cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 10px;
+  padding: 5px 8px 5px 10px;
   background: var(--bar);
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
   z-index: 5;
 }
-.bar-title { flex: 1; font-size: var(--fs-body); }
-.status { font-size: var(--fs-label); color: var(--text-faint); }
-.status.live { color: var(--pass); }
+/*
+  THE TARGET LEVEL, AS A SWITCH.
+
+  Both levels on screen, the active one filled. A single chip reading "AA" looked
+  like a label; nothing about it said there was another level or that clicking
+  it would change every verdict below.
+*/
+.level-seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+.level-opt {
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  min-width: 42px;
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: var(--text-on-btn);     /* 8.5 on --sunken */
+}
+.level-opt:hover { background: var(--btn); color: var(--text); }
+.level-opt.on,
+.level-opt.on:hover { background: var(--accent); color: #fff; }
+
+/* Gives way before anything else in the row: at the narrowest dock, in a wide
+   font, "Not connected" truncates rather than pushing the gear off the panel. */
+.status {
+  font-size: var(--fs-label);
+  color: var(--text-faint);
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .status.busy { color: var(--accent-text); }
 .status.err { color: var(--fail); }
 
@@ -127,41 +171,55 @@ button { font-family: inherit; cursor: pointer; }
   justify-content: center;
 }
 .icon-btn svg { display: block; }
-/* The gear is deliberately red and deliberately simple: it has to read at a
-   glance from across a desk. */
-#btn-options { color: var(--gear); }
-#btn-options:hover { color: #ff6b73; background: var(--btn); }
+/* The gear is the panel's grey, like every other icon. It used to be red, and
+   in a contrast checker red means fail, so it read as an alarm. */
 .icon-btn:hover { color: #fff; background: var(--btn); }
 
 /*
-  The standard, on the face of the panel.
+  The standard, on the face of the panel, as a footnote.
 
   Quiet enough not to compete with the verdict, permanent enough that a
   compliance reviewer never has to open a menu to learn what was measured.
+  Pushed to the foot of the panel by the body's column; on a short dock it
+  simply follows the content.
 */
-.conformance {
+.footnote {
+  margin-top: auto;
+  background: #2b2b2b;           /* --text-dim is 6.5 on it */
+  border-top: 1px solid var(--line);
   font-size: var(--fs-label);
   color: var(--text-dim);
-  background: var(--bar);
-  border-bottom: 1px solid var(--line);
-  padding: 4px 10px 5px;
-  letter-spacing: .01em;
+  line-height: 1.5;
 }
-
-/* The long form, in Settings. Collapsed by default so reference text does not
-   dominate a 240px popover; open, it is the whole story. */
-.conformance-block { font-size: var(--fs-label); color: var(--text-dim); line-height: 1.5; }
-.conformance-block > summary {
-  color: var(--text);
+.footnote > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 3px 8px 3px 10px;
   cursor: pointer;
-  padding: 3px 0;
-  list-style-position: inside;
+  list-style: none;
 }
-.conformance-block p { margin: 0 0 7px; }
-.conformance-block strong { color: var(--text); font-weight: 600; }
-.conformance-block dl { margin: 0 0 7px; }
-.conformance-block dt { color: var(--text); margin-top: 5px; }
-.conformance-block dd { margin: 0 0 0 10px; }
+.footnote > summary::-webkit-details-marker { display: none; }
+/* Full width, so an outside ring would be clipped at the panel edges. Inset, on
+   the footnote's own known grey, like the swatches. */
+.footnote > summary:focus-visible {
+  outline-offset: -3px;
+  border-radius: 0;
+  box-shadow: inset 0 0 0 5px rgba(0, 0, 0, .75);
+}
+.footnote > summary:hover,
+.footnote[open] > summary { color: var(--text); }
+.conformance { flex: 1; min-width: 0; letter-spacing: .01em; }
+.footnote-icon { flex-shrink: 0; display: block; }
+/* Open, it is the whole story: the thresholds and a link to the text. */
+.thresholds { padding: 2px 10px 10px; }
+.thresholds p { margin: 0 0 7px; }
+.thresholds dl { margin: 0 0 7px; }
+.thresholds dt { color: var(--text); margin-top: 5px; }
+.thresholds dd { margin: 0 0 0 10px; }
+.spec-note:empty { display: none; }
+.spec-note { margin-top: 4px; word-break: break-all; -webkit-user-select: text; user-select: text; }
 
 .snapshot-wrap { background: var(--sunken); padding: 8px; }
 
@@ -197,7 +255,16 @@ button { font-family: inherit; cursor: pointer; }
   Height only, so nothing reflows sideways and the canvas keeps its coordinate
   space; drawPreview resizes the backing store on every draw regardless.
 */
+/*
+  And no strip at all when it has nothing to say.
+
+  The strip only ever read "Eyedrop any colour on screen", beside an eyedropper
+  button that says the same thing. It stays for a message worth reading, such
+  as the eyedropper timing out; otherwise the tools row moves up into its place.
+*/
 .snapshot-frame.idle { height: 26px; }
+.snapshot-frame.idle:not(.has-note) { display: none; }
+.snapshot-frame.idle:not(.has-note) ~ .snapshot-tools { margin-top: 0; }
 .snapshot-frame.idle .snapshot-empty { font-size: 10px; padding: 0 8px; }
 /*
   The readout reserves 15px so the panel does not jitter as it updates twenty-
@@ -260,9 +327,6 @@ button { font-family: inherit; cursor: pointer; }
   min-height: 24px;
 }
 
-/* The target level, in the header, because it is what every verdict on screen
-   means. Lit for AAA so the stricter setting is the one that stands out. */
-.level-chip { margin-right: 6px; padding: 3px 7px; }
 .chip.on { background: var(--accent); color: #fff; }
 .chip.off { background: #3a3a3a; color: var(--text-faint); }
 .chip.off:hover { background: var(--btn); color: var(--text-dim); }
@@ -529,6 +593,11 @@ button { font-family: inherit; cursor: pointer; }
    the size it belongs to; they still need to read as a left-hand column. */
 .matrix th[scope="row"] { text-align: left; padding: 2px 6px 2px 0; }
 .matrix .yes { color: var(--pass); }
+/* The target level's column. A tint, not a colour change on the marks, so a
+   pass and a fail still read the same in both columns. At this strength the
+   fail red is 4.66 on it. */
+.matrix col.sel { background: rgba(20, 115, 230, .14); }
+.matrix th.sel { color: var(--accent-text); font-weight: 600; }
 .matrix .no { color: var(--fail); }
 
 .sr-only {

@@ -14,12 +14,25 @@
 <body>
 
 <header class="bar">
-  <span class="bar-title">Contrast</span>
-  <!-- The target level is what every verdict on screen means, so it cannot live
-       only inside the gear popover. Two states, one click to switch. -->
-  <button id="level-chip" class="chip level-chip" aria-pressed="false"
-          title="Target level, click for AAA">AA</button>
-  <span id="status-dot" class="status">idle</span>
+  <!--
+    The target level is what every verdict on screen means, so it cannot live
+    only inside the gear popover. Both levels are on screen as a switch: a lone
+    "AA" chip read as a label, and nobody found out it could be clicked.
+
+    No title. The panel tab already names the panel, and the row is worth more
+    as room for the switch than as a second copy of the name.
+  -->
+  <div class="level-seg" role="group" aria-label="Target level">
+    <button id="level-aa" class="level-opt on" data-value="AA" aria-pressed="true"
+            title="Measure to WCAG AA">AA</button>
+    <button id="level-aaa" class="level-opt" data-value="AAA" aria-pressed="false"
+            title="Measure to WCAG AAA">AAA</button>
+  </div>
+  <span class="spacer"></span>
+  <!-- Empty while all is well. A permanent green "live" said nothing the
+       verdict updating did not already say; this speaks only when the panel is
+       writing to the artwork or has lost Illustrator. -->
+  <span id="status-dot" class="status" hidden></span>
   <button id="btn-options" class="icon-btn" aria-label="Panel options"
           aria-haspopup="dialog" aria-expanded="false" title="Panel options">
     <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" focusable="false">
@@ -33,21 +46,12 @@
      once per settled reading, not once per loupe frame. -->
 <div id="live" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 
-<!--
-  The standard, stated on the face of the panel.
-
-  Every number below is measured against these three success criteria, and a
-  compliance reviewer should not have to open a menu to find out which. The full
-  wording, the thresholds and the backwards-compatibility note live in Settings.
--->
-<div class="conformance">
-  WCAG 2.2 AA &middot; SC 1.4.3 &middot; 1.4.6 &middot; 1.4.11
-</div>
-
 <section class="view-main">
 
   <div class="snapshot-wrap">
-    <div id="snapshot-frame" class="snapshot-frame">
+    <!-- Starts collapsed so the first paint does not flash a 124px empty pane
+         before the script decides there is nothing to show. -->
+    <div id="snapshot-frame" class="snapshot-frame idle">
       <canvas id="snapshot" width="1" height="1"></canvas>
       <div id="marker-fg" class="marker marker-fg" hidden></div>
       <div id="marker-bg" class="marker marker-bg" hidden></div>
@@ -106,7 +110,10 @@
     </div>
     <table class="matrix">
       <caption class="sr-only">Contrast result by text size and conformance level</caption>
-      <tr><td></td><th scope="col">AA</th><th scope="col">AAA</th></tr>
+      <!-- The target level's column is tinted, so the switch in the header and
+           the result it governs are visibly the same thing. -->
+      <colgroup><col><col id="col-aa" class="sel"><col id="col-aaa"></colgroup>
+      <tr><td></td><th scope="col" id="th-aa" class="sel">AA</th><th scope="col" id="th-aaa">AAA</th></tr>
       <tr><th scope="row">Normal</th><td id="m-normal-aa">&middot;</td><td id="m-normal-aaa">&middot;</td></tr>
       <tr><th scope="row">Large</th><td id="m-large-aa">&middot;</td><td id="m-large-aaa">&middot;</td></tr>
       <tr><th scope="row">Icons</th><td id="m-graphic-aa">&middot;</td><td class="dim">n/a</td></tr>
@@ -209,6 +216,46 @@
 
 </section>
 
+<!--
+  The standard, stated on the face of the panel, as a footnote.
+
+  Every number above is measured to these success criteria, and a compliance
+  reviewer should not have to open a menu to find out which. It used to be a
+  strip under the header, which put reference text between the user and the
+  verdict on every reading. At the foot it is still always there, and it follows
+  the target level, so it names the criteria actually being applied.
+
+  A <details>: native disclosure, keyboard operable and announced, for free.
+  Opening it shows the thresholds, and the specification is a link away. Short
+  on purpose: anyone who needs the text itself gets a link to it rather than a
+  transcription of it.
+-->
+<details class="footnote conformance-block" id="footnote">
+  <summary>
+    <span id="conformance-line" class="conformance">WCAG 2.2 AA &middot; 1.4.3, 1.4.11</span>
+    <svg class="footnote-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"
+         fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+      <circle cx="8" cy="8" r="6.3"/><path d="M8 7.2v4"/><path d="M8 4.8v.01"/>
+    </svg>
+  </summary>
+  <div class="thresholds">
+    <p>W3C Recommendation, December&nbsp;2024.</p>
+    <dl>
+      <dt>1.4.3 Contrast (Minimum) &middot; AA</dt>
+      <dd>4.5:1 text &middot; 3:1 large text</dd>
+      <dt>1.4.6 Contrast (Enhanced) &middot; AAA</dt>
+      <dd>7:1 text &middot; 4.5:1 large text</dd>
+      <dt>1.4.11 Non-text Contrast &middot; AA</dt>
+      <dd>3:1 icons and controls</dd>
+    </dl>
+    <p>Large text is 24px, or 18.66px bold, on screen, and 18pt, or 14pt bold,
+       in print. WCAG means CSS points, and 18 of those are 24 pixels.
+       Conforming to 2.2 also conforms to WCAG&nbsp;2.1 and 2.0.</p>
+    <button id="btn-wcag-link" class="link-btn">Read the specification &#8599;</button>
+    <div id="spec-note" class="spec-note"></div>
+  </div>
+</details>
+
 <div id="options-scrim" class="scrim" hidden></div>
 
 <div id="options" class="options popover" role="dialog" aria-modal="true"
@@ -255,31 +302,8 @@
     </span>
   </label>
 
-  <!--
-    A <details>, so the popover is not dominated by reference text on a 240px
-    panel. Native disclosure: keyboard-operable and announced, for free.
-  -->
-  <!--
-    Short on purpose. This exists so a compliance reviewer can see what standard
-    the numbers are measured to without leaving the panel; anyone who needs the
-    specification itself gets a link to it rather than a transcription of it.
-  -->
-  <details class="opt-group conformance-block">
-    <summary>Conformance, WCAG 2.2 AA</summary>
-    <p>W3C Recommendation, December&nbsp;2024. Three success criteria:</p>
-    <dl>
-      <dt>1.4.3 Contrast (Minimum) &middot; AA</dt>
-      <dd>4.5:1 text &middot; 3:1 large text</dd>
-      <dt>1.4.6 Contrast (Enhanced) &middot; AAA</dt>
-      <dd>7:1 text &middot; 4.5:1 large text</dd>
-      <dt>1.4.11 Non-text Contrast &middot; AA</dt>
-      <dd>3:1 icons and controls</dd>
-    </dl>
-    <p>Large text is 24px, or 18.66px bold, on screen, and 18pt, or 14pt bold,
-       in print. WCAG means CSS points, and 18 of those are 24 pixels.
-       Conforming to 2.2 also conforms to WCAG&nbsp;2.1 and 2.0.</p>
-    <button id="btn-wcag-link" class="link-btn">Read the specification &#8599;</button>
-  </details>
+  <!-- The conformance reference moved to the footnote, where the standard is
+       named, so it opens from the line it explains. -->
 
   <div id="doc-note" class="note"></div>
 

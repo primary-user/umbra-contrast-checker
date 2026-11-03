@@ -292,6 +292,14 @@ function loadPlaywright() {
         app.hidden = false;
         if (!app.textContent.trim()) app.textContent = 'Inside a group at 65% — colours shown as rendered';
         // The outlined type note, built the way the panel builds it, buttons and all.
+        // The footnote open, and the header status in its least contrasting
+        // state, red on the bar. Both are hidden in a healthy resting panel.
+        document.getElementById('footnote').open = true;
+        document.getElementById('spec-note').textContent = 'https://www.w3.org/TR/WCAG22/#contrast-minimum';
+        const status = document.getElementById('status-dot');
+        status.textContent = 'Not connected';
+        status.className = 'status err';
+        status.hidden = false;
         const outline = document.getElementById('outline-note');
         outline.hidden = false;
         if (!outline.textContent.trim()) {
@@ -303,7 +311,8 @@ function loadPlaywright() {
     await wait(200);
 
     const surfaces = await page.evaluate(() => ({
-        options: !document.getElementById('options').hidden
+        options: !document.getElementById('options').hidden,
+        footnote: document.getElementById('footnote').open
     }));
     ok(surfaces.options,
         'every collapsed surface is open before anything is measured',
@@ -401,6 +410,41 @@ function loadPlaywright() {
         selfCheck.length + ' failing');
 
     /*
+      The target level's column is tinted through a <col>, which is not an
+      ancestor of its cells, so the sweep above measures those cells against the
+      panel grey and never sees the tint. Composite it by hand.
+    */
+    const tinted = await page.evaluate(() => {
+        const srgb = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        const lum = (c) => 0.2126 * srgb(c[0]) + 0.7152 * srgb(c[1]) + 0.0722 * srgb(c[2]);
+        const nums = (str) => (str.match(/[\d.]+/g) || []).map(Number);
+        const out = [];
+        for (const level of ['AA', 'AAA']) {
+            document.getElementById(level === 'AA' ? 'level-aa' : 'level-aaa').click();
+            const col = document.querySelector('.matrix col.sel');
+            const tint = nums(getComputedStyle(col).backgroundColor);
+            const base = nums(getComputedStyle(document.body).backgroundColor);
+            const a = tint.length > 3 ? tint[3] : 1;
+            const mixed = [0, 1, 2].map(i => tint[i] * a + base[i] * (1 - a));
+            const index = [...col.parentNode.children].indexOf(col);
+            document.querySelectorAll('.matrix tr').forEach((row) => {
+                const cell = row.children[index];
+                if (!cell || !cell.textContent.trim()) return;
+                const ink = nums(getComputedStyle(cell).color);
+                const A = lum(ink), B = lum(mixed);
+                const r = (Math.max(A, B) + 0.05) / (Math.min(A, B) + 0.05);
+                out.push({ level, text: cell.textContent.trim(), ratio: Math.round(r * 100) / 100 });
+            });
+        }
+        document.getElementById('level-aa').click();
+        return out;
+    });
+    const weakTint = tinted.filter(t => t.ratio < 4.5);
+    ok(tinted.length >= 8 && weakTint.length === 0,
+        'and the highlighted column\'s marks clear 4.5:1 on its tint, at either level',
+        tinted.length + ' cells, failing: ' + weakTint.map(t => t.level + ' ' + t.text + ' ' + t.ratio).join(', '));
+
+    /*
       Hover states, measured under a real pointer.
 
       A rule like `#btn-options:hover { color: #ff6b73; background: var(--btn) }`
@@ -414,7 +458,7 @@ function loadPlaywright() {
       than the chrome the accent tint was chosen against, so all three failed at
       4.46:1 while the resting state passed.
     */
-    const HOVERABLE = ['#btn-options', '#btn-camera',
+    const HOVERABLE = ['#btn-options', '#btn-camera', '#level-aaa',
                        '#fix-target', '#mode-chip', '#btn-pick-fg', '#btn-pick-bg',
                        '#seg-level button:last-child',
                        '#btn-wcag-link', '#btn-site', '#btn-kofi'];
@@ -440,6 +484,12 @@ function loadPlaywright() {
     await page.mouse.move(2, 2);
     await page.click('#btn-options-close');
     await page.evaluate(() => {
+        document.getElementById('footnote').open = false;
+        document.getElementById('spec-note').textContent = '';
+        const status = document.getElementById('status-dot');
+        status.textContent = '';
+        status.className = 'status';
+        status.hidden = true;
         document.getElementById('notice').hidden = true;
         document.getElementById('capture-note').hidden = true;
         document.getElementById('appearance-note').hidden = true;
@@ -470,14 +520,37 @@ function loadPlaywright() {
             swatches: at('.swatch-row'),
             sliders: at('.sliders'),
             frame: at('#snapshot-frame'),
+            tools: at('.snapshot-tools'),
+            bar: at('.bar'),
+            main: at('.view-main'),
+            foot: at('#footnote'),
+            hint: at('#pick-hint'),
             idle: document.getElementById('snapshot-frame').classList.contains('idle'),
-            total: Math.round(document.body.scrollHeight)
+            viewport: window.innerHeight
         };
     });
 
     ok(layout.verdict.top < 200,
         'the verdict starts in the top 200px, not 420 down',
         layout.verdict.top + 'px');
+    /*
+      The compact header. One row of switch and gear, no conformance strip under
+      it and no empty loupe strip, so the verdict starts under the tools row.
+      It was at 137px.
+    */
+    ok(layout.bar.height <= 42, 'the header is a single compact row', layout.bar.height + 'px');
+    ok(layout.tools.top - (layout.bar.top + layout.bar.height) <= 10,
+        'and the tools come straight after it, with no strip in between',
+        (layout.tools.top - (layout.bar.top + layout.bar.height)) + 'px');
+    // Less any picker hint line, which only shows while a picked colour is held.
+    ok(layout.verdict.top - layout.hint.height < 100,
+        'so the verdict starts under 100px down', layout.verdict.top + 'px, hint ' + layout.hint.height + 'px');
+    ok(layout.foot.top >= layout.main.top + layout.main.height,
+        'the conformance footnote comes after everything else',
+        layout.foot.top + ' vs ' + (layout.main.top + layout.main.height));
+    ok(Math.abs(layout.foot.top + layout.foot.height - layout.viewport) <= 1,
+        'and sits at the foot of a panel taller than its content',
+        (layout.foot.top + layout.foot.height) + ' vs ' + layout.viewport);
     ok(layout.verdict.top < layout.swatches.top,
         'and above the colour tools it describes',
         layout.verdict.top + ' vs ' + layout.swatches.top);
@@ -491,10 +564,12 @@ function loadPlaywright() {
         gap + 'px apart');
 
     ok(layout.idle === true, 'the preview pane is collapsed when nothing is being sampled');
-    ok(layout.frame.height < 40,
-        'to a thin strip rather than 124px of empty grey', layout.frame.height + 'px');
-    ok(layout.total < 520,
-        'and the whole panel fits a short dock without scrolling', layout.total + 'px');
+    ok(layout.frame.height === 0,
+        'all the way, rather than a strip repeating what the eyedropper button says',
+        layout.frame.height + 'px');
+    const natural = layout.main.top + layout.main.height + layout.foot.height;
+    ok(natural < 480,
+        'and the whole panel fits a short dock without scrolling', natural + 'px');
 
     section('and the pane expands the moment the eyedropper is armed');
     /*
@@ -534,7 +609,7 @@ function loadPlaywright() {
       dropped focus to BODY.
     */
     const reachable = await page.evaluate(() => {
-        const wanted = ['#level-chip', '#btn-options', '#mode-chip', '#btn-pick-fg',
+        const wanted = ['#level-aa', '#level-aaa', '#btn-options', '#footnote > summary', '#mode-chip', '#btn-pick-fg',
                         '#btn-pick-bg', '#btn-camera', '#swatch-fg',
                         '#swatch-bg'];
         const missing = [];
@@ -543,7 +618,7 @@ function loadPlaywright() {
             if (!node) { missing.push(sel + ' (absent)'); continue; }
             // A native control is focusable without a tabindex; anything else
             // needs one, and a negative one keeps it out of the tab order.
-            const native = /^(BUTTON|INPUT|SELECT|TEXTAREA|A)$/.test(node.tagName);
+            const native = /^(BUTTON|INPUT|SELECT|TEXTAREA|A|SUMMARY)$/.test(node.tagName);
             if (!native && node.tabIndex < 0) missing.push(sel + ' (' + node.tagName + ')');
         }
         return { missing };
@@ -585,7 +660,7 @@ function loadPlaywright() {
 
     const noRing = [];
     const notReached = [];
-    for (const id of ['btn-camera', 'swatch-bg', 'btn-pick-fg', 'level-chip']) {
+    for (const id of ['btn-camera', 'swatch-bg', 'btn-pick-fg', 'level-aaa']) {
         const clip = await boxOf('#' + id);
         const before = (await page.screenshot({ clip })).toString('base64');
         if (!(await tabTo(id))) { notReached.push(id); continue; }
@@ -632,7 +707,7 @@ function loadPlaywright() {
     });
     const escaped = trapped.filter(id =>
         ['btn-camera', 'mode-chip', 'btn-pick-fg', 'btn-pick-bg',
-         'level-chip'].indexOf(id) >= 0);
+         'level-aa', 'level-aaa'].indexOf(id) >= 0);
     ok(escaped.length === 0,
         'Tab cannot walk out of the open popover to the controls behind its scrim',
         escaped.join(', '));
@@ -719,14 +794,18 @@ function loadPlaywright() {
 
     // Disarmed, the ring must be gone from the pixels too — not merely from the
     // class list. A ring that never clears reads as "still sampling" forever.
-    const off = (await page.locator('#snapshot-frame').screenshot()).toString('base64');
+    // The idle pane now collapses completely, so look where its top edge was.
+    const offShown = await page.evaluate(() =>
+        getComputedStyle(document.getElementById('snapshot-frame')).display);
+    ok(offShown === 'none', 'disarmed with nothing to say, the pane is not drawn at all', offShown);
+    const off = (await page.locator('.snapshot-wrap').screenshot()).toString('base64');
     const offEdge = await page.evaluate(async (b64) => {
         const img = new Image();
         await new Promise((res) => { img.onload = res; img.src = 'data:image/png;base64,' + b64; });
         const c = document.createElement('canvas');
         c.width = img.width; c.height = img.height;
         c.getContext('2d').drawImage(img, 0, 0);
-        const d = c.getContext('2d').getImageData(Math.round(img.width / 2), 1, 1, 1).data;
+        const d = c.getContext('2d').getImageData(Math.round(img.width / 2), 9, 1, 1).data;
         return [d[0], d[1], d[2]];
     }, off);
     ok(!isAccent(offEdge), 'and it is gone from the pixels once disarmed', offEdge.join(','));
@@ -752,7 +831,7 @@ function loadPlaywright() {
 
     const lines = await page.evaluate(() => {
         const out = [];
-        for (const id of ['ratio-note', 'pick-hint']) {
+        for (const id of ['ratio-note', 'pick-hint', 'conformance-line']) {
             const el = document.getElementById(id);
             const text = el ? el.textContent.trim() : '';
             if (!text) { out.push({ id, lines: -1, text: '' }); continue; }
@@ -790,6 +869,39 @@ function loadPlaywright() {
     section('layout holds at the panel\'s minimum size');
     await page.setViewportSize({ width: 220, height: 420 });
     await wait(200);
+    /*
+      The footnote is longest at AAA, where it names three criteria, and the
+      header is fullest when it has something to say. Neither may push past the
+      panel's edge. Whether the footnote fits one line here depends on the font:
+      it does in Adobe Clean, SF and Segoe UI, and may wrap in a wide Linux
+      fallback, which is fine for a footnote. Widths are what matter.
+    */
+    const narrow = await page.evaluate(async () => {
+        document.getElementById('level-aaa').click();
+        const status = document.getElementById('status-dot');
+        status.textContent = 'Not connected';
+        status.className = 'status err';
+        status.hidden = false;
+        await new Promise(r => setTimeout(r, 60));
+        const bar = document.querySelector('.bar');
+        const foot = document.querySelector('#footnote > summary');
+        const kids = [...bar.children].filter(k => !k.hidden).map(k => k.getBoundingClientRect());
+        const gear = document.getElementById('btn-options').getBoundingClientRect();
+        const result = {
+            barFits: bar.scrollWidth <= bar.clientWidth + 1 && gear.right <= window.innerWidth + 0.5,
+            footFits: foot.scrollWidth <= foot.clientWidth + 1,
+            barRow: kids.every(k => Math.abs(k.top + k.height / 2 - (kids[0].top + kids[0].height / 2)) < 2),
+            barH: Math.round(bar.getBoundingClientRect().height),
+            pageW: document.documentElement.scrollWidth
+        };
+        status.textContent = ''; status.className = 'status'; status.hidden = true;
+        document.getElementById('level-aa').click();
+        return result;
+    });
+    ok(narrow.footFits, 'the AAA footnote stays inside the panel at 220px');
+    ok(narrow.barRow && narrow.barH <= 42 && narrow.barFits && narrow.pageW <= 221,
+        'and the header keeps the switch, a status and the gear on one row, gear in view',
+        JSON.stringify(narrow));
     const overflow = await page.evaluate(() => ({
         scrollW: document.documentElement.scrollWidth,
         clientW: document.documentElement.clientWidth

@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.13.0
+
+- **A compact header.** AA and AAA now sit side by side as a switch, with the
+  level in use filled blue, so it is clear there are two levels and which one
+  every verdict means. The results table tints that level's column.
+- **The header only speaks when something needs saying.** The green "live"
+  and the "Contrast" title are gone. Status appears while a fix is being
+  written, when one fails, or when the panel loses Illustrator.
+- **The conformance line is a footnote.** It sits at the bottom of the panel,
+  follows the target level, and opens to show the thresholds. It used to sit
+  between the header and the verdict on every reading.
+- **No empty loupe strip.** The loupe opens when you eyedrop. While idle it
+  takes no room, unless it has something to tell you.
+- **A grey gear.** Red means fail in this panel, so the gear no longer uses it.
+- **The verdict starts 54px higher** as a result.
+
 ## 1.12.0
 
 - **Text with more than one colour is graded at its weakest part.** A frame

@@ -1826,7 +1826,7 @@ function wcagPing() {
         var doc = activeDoc();
         return toJson({
             ok: true,
-            version: '1.12.0',
+            version: '1.13.0',
             appVersion: (function () { try { return String(app.version); } catch (e) { return '?'; } })(),
             hasDocument: doc !== null,
             // The panel writes its captures here, so it needs a writable path.

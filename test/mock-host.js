@@ -473,7 +473,7 @@ function makeHost() {
         switch (fnName) {
             case 'wcagPing':
                 return {
-                    ok: true, version: '1.12.0', appVersion: '30.7.0',
+                    ok: true, version: '1.13.0', appVersion: '30.7.0',
                     hasDocument: scenario !== 'nodoc',
                     tempFolder: '/tmp',
                     os: 'Macintosh OS 26.5.2/64'

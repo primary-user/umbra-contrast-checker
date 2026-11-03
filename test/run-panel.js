@@ -174,6 +174,8 @@ function closeAll() {
 
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const txt = (doc, id) => (doc.getElementById(id) || {}).textContent;
+// The level the header switch shows as selected.
+const levelOn = (doc) => (doc.querySelector('.level-seg .level-opt.on') || {}).textContent;
 const click = (doc, id) => doc.getElementById(id).dispatchEvent(
     new (doc.defaultView.MouseEvent)('click', { bubbles: true })
 );
@@ -211,7 +213,10 @@ async function probe(win) {
     await wait(80);
 
     ok(errors.length === 0, 'no script errors on boot', errors.join(' | '));
-    ok(txt(doc, 'status-dot') === 'live', 'status shows live', txt(doc, 'status-dot'));
+    ok(doc.getElementById('status-dot').hidden && txt(doc, 'status-dot') === '',
+        'a connected panel says nothing in the header, no green "live"',
+        txt(doc, 'status-dot'));
+    ok(!doc.querySelector('.bar-title'), 'and the header carries no title; the panel tab names it');
     ok(txt(doc, 'ratio') === '4.12', 'ratio reads 4.12 for white on teal', txt(doc, 'ratio'));
     ok(doc.getElementById('ratio').className.includes('fail'), 'ratio styled as failing');
     ok(txt(doc, 'hex-fg') === '#FFFFFF', 'foreground hex', txt(doc, 'hex-fg'));
@@ -1537,12 +1542,11 @@ async function probe(win) {
     */
     ({ win, doc, host, errors } = boot());
     await wait(120);
-    ok(txt(doc, 'level-chip') === 'AA', 'starts at AA', txt(doc, 'level-chip'));
+    ok(levelOn(doc) === 'AA', 'starts at AA', levelOn(doc));
 
-    click(doc, 'level-chip');
+    click(doc, 'level-aaa');
     await wait(120);
-    ok(txt(doc, 'level-chip') === 'AAA', 'the header chip switches the target',
-        txt(doc, 'level-chip'));
+    ok(levelOn(doc) === 'AAA', 'the header switch changes the target', levelOn(doc));
     ok(doc.querySelector('#seg-level button[data-value="AAA"]').className.indexOf('on') >= 0,
         'and the popover control agrees — they are one setting, not two');
     ok(/needs 7/.test(txt(doc, 'ratio-note')),
@@ -1555,8 +1559,10 @@ async function probe(win) {
     // A reload is a fresh window against the same storage.
     ({ win, doc, host, errors } = boot(null, true));
     await wait(200);
-    ok(txt(doc, 'level-chip') === 'AAA', 'AAA is still selected after a reload',
-        txt(doc, 'level-chip'));
+    ok(levelOn(doc) === 'AAA', 'AAA is still selected after a reload', levelOn(doc));
+    ok(doc.getElementById('level-aaa').getAttribute('aria-pressed') === 'true' &&
+       doc.getElementById('level-aa').getAttribute('aria-pressed') === 'false',
+        'and the switch is painted to match, for a screen reader too');
     ok(doc.getElementById('opt-rendered').checked === false,
         'and so is the rendered-colour switch');
     ok(doc.querySelector('#seg-level button[data-value="AAA"]').className.indexOf('on') >= 0,
@@ -1593,12 +1599,12 @@ async function probe(win) {
       is through ANOTHER setting being saved while it is active, which writes the
       whole preference set. Change the level, then reload.
     */
-    click(doc, 'level-chip');
+    click(doc, 'level-aaa');
     await wait(80);
     ({ win, doc, host, errors } = boot(null, true));
     await wait(200);
-    ok(txt(doc, 'level-chip') === 'AAA', 'the level change that was saved alongside it did persist',
-        txt(doc, 'level-chip'));
+    ok(levelOn(doc) === 'AAA', 'the level change that was saved alongside it did persist',
+        levelOn(doc));
     ok(doc.querySelector('#seg-size button[data-value="auto"]').className.indexOf('on') >= 0,
         'but the outlined type answer did not: a reload is back on Auto');
 
@@ -1801,23 +1807,39 @@ async function probe(win) {
     section('the compliance line, and the spec link');
     /*
       The panel has to say what standard it measures to without anyone opening a
-      menu — that is the whole point of a compliance line. The long form lives in
-      Settings, short, with a link out rather than a transcription of the spec.
+      menu — that is the whole point of a compliance line. It is a footnote now,
+      the last thing in the panel, and it names the criteria the target level
+      applies. The long form opens from the line itself, short, with a link out
+      rather than a transcription of the spec.
     */
     ({ win, doc, host, errors } = boot());
     await wait(150);
-    const conformance = doc.querySelector('.conformance').textContent;
-    ok(/WCAG 2\.2/.test(conformance), 'the standard is named on the face of the panel', conformance);
-    ok(/1\.4\.3/.test(conformance) && /1\.4\.6/.test(conformance) && /1\.4\.11/.test(conformance),
-        'with all three success criteria it implements', conformance);
-    ok(!doc.querySelector('.conformance').hidden, 'and it is not hidden behind anything');
+    const conformance = () => txt(doc, 'conformance-line');
+    ok(/WCAG 2\.2 AA\b/.test(conformance()), 'the standard is named on the face of the panel', conformance());
+    ok(/1\.4\.3/.test(conformance()) && /1\.4\.11/.test(conformance()) && !/1\.4\.6/.test(conformance()),
+        'at AA, the two criteria AA applies', conformance());
+    const foot = doc.getElementById('footnote');
+    ok(!!foot && foot.parentNode === doc.body && !foot.hidden, 'as a footnote, not hidden behind anything');
+    ok(doc.body.compareDocumentPosition(foot) && !!(doc.querySelector('.view-main').compareDocumentPosition(foot) & 4),
+        'and it comes after the verdict and the colour tools, not above them');
+    ok(!doc.querySelector('.bar .conformance') && !doc.querySelector('body > .conformance'),
+        'the old strip under the header is gone');
 
-    click(doc, 'btn-options');
-    await wait(120);
+    click(doc, 'level-aaa');
+    await wait(80);
+    ok(/WCAG 2\.2 AAA\b/.test(conformance()) && /1\.4\.3/.test(conformance()) &&
+       /1\.4\.6/.test(conformance()) && /1\.4\.11/.test(conformance()),
+        'at AAA it adds 1.4.6, since AAA means meeting the AA criteria too', conformance());
+    click(doc, 'level-aa');
+    await wait(80);
+    ok(/WCAG 2\.2 AA\b/.test(conformance()), 'and follows the switch back', conformance());
+
     const detail = doc.querySelector('.conformance-block');
-    ok(!!detail, 'Settings carries the long form');
+    ok(detail === foot, 'the long form opens from the footnote itself');
     ok(detail.tagName === 'DETAILS' && !detail.open,
-        'collapsed by default, so it does not fill the popover', detail.tagName);
+        'collapsed by default, so it costs one line', detail.tagName);
+    ok(!doc.querySelector('#options .conformance-block'),
+        'and Settings no longer carries a second copy');
     ok(/4\.5:1/.test(detail.textContent) && /7:1/.test(detail.textContent) &&
        /3:1/.test(detail.textContent), 'with the thresholds', detail.textContent.slice(0, 80));
     ok(/2\.1/.test(detail.textContent),
@@ -1827,16 +1849,90 @@ async function probe(win) {
       A link, not an <a href>. A CEP panel is a chrome-less webview: a normal
       link would navigate the panel itself to the W3C site and leave no way back.
     */
-    ok(doc.querySelectorAll('#options a[href]').length === 0,
-        'nothing in the popover is a raw link that would replace the panel');
-    ok(!!doc.getElementById('btn-wcag-link'), 'the spec is reachable by a button');
+    ok(doc.querySelectorAll('a[href]').length === 0,
+        'nothing in the panel is a raw link that would replace the panel');
+    ok(!!doc.getElementById('btn-wcag-link') && foot.contains(doc.getElementById('btn-wcag-link')),
+        'the spec is reachable by a button in the footnote');
     click(doc, 'btn-wcag-link');
     await wait(60);
-    ok(/w3\.org/.test(txt(doc, 'doc-note')),
-        'which falls back to showing the URL when there is no browser to open',
-        txt(doc, 'doc-note'));
+    ok(/w3\.org/.test(txt(doc, 'spec-note')),
+        'which falls back to showing the URL beside it when there is no browser to open',
+        txt(doc, 'spec-note'));
+    ok(foot.contains(doc.getElementById('spec-note')),
+        'in the footnote, not in the closed Settings popover where nobody would see it');
+
+    section('the header: a level switch and nothing else to read');
+    /*
+      The header used to hold a title, a single "AA" chip that hid the fact a
+      second level existed, a permanent green "live", and a red gear. Now it is
+      the level switch and the gear, and words appear only when something needs
+      saying.
+    */
+    ({ win, doc, host, errors } = boot());
+    await wait(150);
+    const seg = doc.querySelector('.bar .level-seg');
+    ok(!!seg && seg.getAttribute('role') === 'group' && /level/i.test(seg.getAttribute('aria-label') || ''),
+        'both levels sit in the header as one labelled group', seg && seg.outerHTML.slice(0, 80));
+    const opts = seg ? [...seg.querySelectorAll('button')] : [];
+    ok(opts.map(b => b.textContent).join('|') === 'AA|AAA', 'AA and AAA, both on screen',
+        opts.map(b => b.textContent).join('|'));
+    ok(doc.getElementById('level-aa').getAttribute('aria-pressed') === 'true' &&
+       doc.getElementById('level-aaa').getAttribute('aria-pressed') === 'false',
+        'the selected one is pressed, for a screen reader as well as the eye');
+    ok(doc.getElementById('col-aa').className === 'sel' && doc.getElementById('col-aaa').className === '' &&
+       doc.getElementById('th-aa').className === 'sel',
+        'the results table marks the column the target uses');
+
+    click(doc, 'level-aaa');
+    await wait(100);
+    ok(levelOn(doc) === 'AAA' && doc.getElementById('level-aaa').getAttribute('aria-pressed') === 'true' &&
+       doc.getElementById('level-aa').getAttribute('aria-pressed') === 'false',
+        'pressing AAA selects it and releases AA', levelOn(doc));
+    ok(doc.getElementById('col-aaa').className === 'sel' && doc.getElementById('col-aa').className === '' &&
+       doc.getElementById('th-aaa').className === 'sel' && doc.getElementById('th-aa').className === '',
+        'the highlighted column moves with it');
+    ok(/needs 7/.test(txt(doc, 'ratio-note')), 'and the verdict is regraded', txt(doc, 'ratio-note'));
+    click(doc, 'level-aaa');
+    await wait(80);
+    ok(levelOn(doc) === 'AAA', 'pressing the selected level again leaves it selected; it is a switch, not a toggle',
+        levelOn(doc));
+
+    click(doc, 'btn-options');
+    await wait(80);
+    doc.querySelector('#seg-level button[data-value="AA"]').dispatchEvent(
+        new win.MouseEvent('click', { bubbles: true }));
+    await wait(80);
+    ok(levelOn(doc) === 'AA' && /WCAG 2\.2 AA\b/.test(txt(doc, 'conformance-line')),
+        'the Settings control moves the header switch and the footnote too',
+        levelOn(doc) + ' / ' + txt(doc, 'conformance-line'));
     click(doc, 'btn-options-close');
     await wait(60);
+
+    const gearStyle = fs.readFileSync(path.join(CLIENT, 'css', 'panel.css'), 'utf8');
+    ok(!/#btn-options\s*\{[^}]*color/.test(gearStyle) && !/--gear/.test(gearStyle),
+        'the gear is the panel grey, not red: red in a contrast checker means fail');
+
+    section('the loupe pane takes no room until there is something in it');
+    ok(doc.getElementById('snapshot-frame').classList.contains('idle') &&
+       !doc.getElementById('snapshot-frame').classList.contains('has-note'),
+        'idle with only the "eyedrop any colour" prompt, so it collapses completely');
+    {
+        const html = fs.readFileSync(path.join(CLIENT, 'index.html'), 'utf8');
+        ok(/id="snapshot-frame" class="snapshot-frame idle"/.test(html),
+            'and starts collapsed in the markup, so the first paint does not flash an empty pane');
+    }
+
+    // A message worth reading keeps a strip open even with the pane idle.
+    win.CEP.loupeCapture = (folder, out, size, done) => setTimeout(() => done(false, 'denied'), 5);
+    click(doc, 'btn-camera');
+    await wait(1400);
+    {
+        const frame = doc.getElementById('snapshot-frame');
+        ok(frame.classList.contains('idle') && frame.classList.contains('has-note') &&
+           /Eyedropper unavailable/.test(txt(doc, 'snapshot-empty')),
+            'an eyedropper that fails says so in the strip, instead of vanishing silently',
+            frame.className + ' / ' + txt(doc, 'snapshot-empty'));
+    }
 
     section('colour sliders: preview while dragging, one write on release');
     /*
@@ -2101,8 +2197,8 @@ async function probe(win) {
         }
         w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
         await wait(30);
-        ok(txt(w.document, 'status-dot') === 'no host', 'degrades gracefully outside CEP',
-            txt(w.document, 'status-dot'));
+        ok(txt(w.document, 'status-dot') === 'Not connected' && !w.document.getElementById('status-dot').hidden,
+            'degrades gracefully outside CEP, and says so in words', txt(w.document, 'status-dot'));
         ok(/must run inside Illustrator/.test(txt(w.document, 'ratio-note')), 'explains why');
     }
 

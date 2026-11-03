@@ -92,7 +92,7 @@ reporting a low number.
 > Text is #000000, but renders #7B7A75 (group "Header" at 50% opacity).
 > [Measure the authored colours instead]
 
-**Samples anything on screen.** The preview pane is a loupe. Magnified pixels
+**Samples anything on screen.** The eyedropper opens a loupe. Magnified pixels
 around the pointer, with a live hex and a live contrast ratio, so you can hover
 across a photo or a gradient and see where text would start passing. Click, or
 press Enter, to lock a colour. Your selection is restored afterwards, so the
@@ -124,10 +124,11 @@ appears only when no brightness at your current hue passes, so its presence is
 itself information. Rungs no shade of that colour can reach say so rather than
 quietly disappearing.
 
-**States what it conforms to.** A line under the header reads *WCAG 2.2 AA · SC
-1.4.3 · 1.4.6 · 1.4.11*. Those are the three success criteria the tool
-implements, on the face of the panel where a compliance reviewer can see them
-without opening a menu. WCAG 2.2 has been the W3C Recommendation since December
+**States what it conforms to.** A footnote at the bottom of the panel reads
+*WCAG 2.2 AA · 1.4.3, 1.4.11*, the success criteria the target level applies.
+Switch to AAA and it adds 1.4.6. It sits on the face of the panel, where a
+compliance reviewer can see it without opening a menu, and clicking it shows
+the thresholds. WCAG 2.2 has been the W3C Recommendation since December
 2024 and its contrast criteria are unchanged from 2.1 and 2.0, so a requirement
 written against any of the three is satisfied by this reading.
 
